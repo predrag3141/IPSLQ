@@ -95,6 +95,7 @@ type PSLQContext struct {
 	IterationsBeforeInverting       int       `json:"iterations_before_inverting"`
 	IterationsAfterInverting        int       `json:"iterations_after_inverting"`
 	IterationsBeforeFindingRelation int       `json:"iterations_before_finding_relation"`
+	TotalIterations                 int       `json:"total_iterations"`
 	ReductionsBeforeInverting       int       `json:"reductions_before_inverting"`
 	ReductionsAfterInverting        int       `json:"reductions_after_inverting"`
 }
@@ -132,13 +133,14 @@ func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThr
 	}
 }
 
-// UpdateSolutions  updates flags and counts, and populates pc with the solutions from the
+// Update  updates flags and counts, and populates pc with the solutions from the
 // PSLQ state. The solution updates only occur if setSolutions is true, though a check for
 // finding pc.Relation is always done.
-func (pc *PSLQContext) UpdateSolutions(state *pslqops.State, iterationNumber int, setSolutions bool) error {
+func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 	// Set flags and counts unrelated to solutions
 	pc.IterationsBeforeInverting, pc.IterationsAfterInverting = state.IterationCounts()
 	pc.ReductionsBeforeInverting, pc.ReductionsAfterInverting = state.ReductionCounts()
+	pc.TotalIterations = pc.IterationsBeforeInverting + pc.IterationsAfterInverting
 
 	// Check solutions to see if any matches pc.Relation
 	if setSolutions {
@@ -162,7 +164,7 @@ func (pc *PSLQContext) UpdateSolutions(state *pslqops.State, iterationNumber int
 		// The putative solution is an actual solution
 		if (!pc.FoundRelation) && pc.solutionMatchesRelation(putativeSolution) {
 			pc.FoundRelation = true
-			pc.IterationsBeforeFindingRelation = iterationNumber
+			pc.IterationsBeforeFindingRelation = pc.TotalIterations
 		}
 		if setSolutions {
 			pc.Solutions = append(pc.Solutions, putativeSolution)

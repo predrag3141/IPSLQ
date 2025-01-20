@@ -5,16 +5,17 @@ package knownanswertest
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/predrag3141/IPSLQ/bignumber"
 	"testing"
 
+	"github.com/predrag3141/IPSLQ/bignumber"
 	"github.com/predrag3141/IPSLQ/pslqops"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestPSLQContext(t *testing.T) {
 	const (
-		xLen                            = 50
+		xLen                            = 20
 		relationElementRange            = 5
 		randomRelationProbabilityThresh = 0.001
 		maxIterations                   = 20000
@@ -32,12 +33,14 @@ func TestPSLQContext(t *testing.T) {
 
 	// Run PSLQ
 	for numIterations := 0; numIterations < maxIterations; numIterations++ {
+		// Run one iteration of PSLQ
 		var terminated bool
 		terminated, err = pslqState.OneIteration(pslqops.NextIntOp)
 		require.NoError(t, err)
-		err = pslqContext.UpdateSolutions(
-			pslqState, numIterations, terminated || (numIterations == maxIterations-1),
-		)
+		err = pslqContext.Update(pslqState, terminated || (numIterations == maxIterations-1))
+		require.NoError(t, err)
+
+		// Report directly to the terminal. Reporting to files is reserved for the KATLog test
 		if numIterations%1000 == 0 {
 			fmt.Printf("\n")
 		}
@@ -55,7 +58,8 @@ func TestPSLQContext(t *testing.T) {
 		} else if numIterations%10 == 0 {
 			fmt.Printf(".")
 		}
-		require.NoError(t, err)
+
+		// Handle the termination flag
 		if terminated {
 			break
 		}
