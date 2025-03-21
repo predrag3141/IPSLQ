@@ -151,6 +151,7 @@ func (s *State) OneIteration(
 	getR func(*bigmatrix.BigMatrix) (*IntOperation, error),
 	checkInvariantsOptional ...bool,
 ) (bool, error) {
+	fmt.Printf("==========\nB:\n%v\nH:\n%v\n", s.b, s.h) // debug
 	// Initializations
 	checkInvariants := false
 	if len(checkInvariantsOptional) > 0 {
