@@ -1,5 +1,9 @@
-To run this sample, use the command
+To run this sample, use these commands:
 
 ```bash
- go test -v pslqcontext.go pslqcontext_test.go
+git clone https://github.com/predrag3141/IPSLQ.git
+cd IPSLQ
+git checkout toy_example
+cd knownanswertest
+go test -v pslqcontext.go pslqcontext_test.go
 ```
