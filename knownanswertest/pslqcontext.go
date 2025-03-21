@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"time"
 )
 
 // The input to PSLQ will be a xLen-long vector with
@@ -106,6 +107,7 @@ type PSLQContext struct {
 // to have a random solution not equal to m, but with norm less than |m|, with probability
 // randomRelationProbabilityThresh. See the file-level comments for details.
 func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThresh float64) *PSLQContext {
+	rand.Seed(time.Now().Unix() % 1000)
 	relation, relationNorm := getCausalRelation(xLen, relationElementRange)
 	maxXBasedOnCubeVolume := math.Pow(float64(relationElementRange), float64(xLen)) / randomRelationProbabilityThresh
 	maxXBasedOnSphereVolume := sphereVolume(relationNorm, xLen) / randomRelationProbabilityThresh
