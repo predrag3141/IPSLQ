@@ -99,10 +99,12 @@ func (kl *KATLog) ReportProgress(pc *PSLQContext) error {
 	// Determine whether to report progress
 	reportProgress := false
 	if pc.IterationsAfterInverting == 0 {
+		// Inversion has not yet occurred
 		if (pc.TotalIterations % kl.reportingPeriodBeforeInverting) == 0 {
 			reportProgress = true
 		}
 	} else if (pc.TotalIterations % kl.reportingPeriodAfterInverting) == 0 {
+		// Inversion has occurred, and the latest reporting period has just been completed
 		reportProgress = true
 	}
 	if !reportProgress {

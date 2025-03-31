@@ -532,7 +532,6 @@ func (bm *BigMatrix) AsFloat64() ([]float64, error) {
 		}
 	}
 	return retVal, nil
-
 }
 
 // Dimensions returns the number of rows and columns in bm, in that order.

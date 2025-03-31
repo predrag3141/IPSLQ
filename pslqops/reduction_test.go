@@ -141,7 +141,7 @@ func TestGetE(t *testing.T) {
 				numAllZeroColumnsCalculated++
 			}
 
-			// Check whether H is reduced before being left-multiplied by D
+			// Check whether M is reduced before being right-multiplied by E
 			actual.mIsReduced, actual.mUnreducedRow, actual.mUnreducedColumn, err = isColumnReduced(
 				m, bigNumberBitTolerance, "TestGetE",
 			)
@@ -159,8 +159,6 @@ func TestGetE(t *testing.T) {
 			one := bignumber.NewFromInt64(1)
 			if unreducedColumnCount == 0 {
 				require.True(t, actual.isIdentity)
-			} else {
-				require.False(t, actual.isIdentity)
 			}
 			for i := 0; i < eNumRows; i++ {
 				var diagonalElement *bignumber.BigNumber
@@ -172,7 +170,7 @@ func TestGetE(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			// Check that D reduces H
+			// Check that E reduces M in columns of E that are not the identity
 			var me *bigmatrix.BigMatrix
 			me, err = bigmatrix.NewEmpty(mNumRows, mNumRows).MulUpperLeft(m, e)
 			require.NoError(t, err)
@@ -182,9 +180,21 @@ func TestGetE(t *testing.T) {
 				me, bigNumberBitTolerance, "TestGetE",
 			)
 			require.NoError(t, err)
-			require.True(t, actual.meIsReduced)
-			require.Equal(t, -1, actual.meUnreducedRow)
-			require.Equal(t, -1, actual.meUnreducedColumn)
+			if actual.meIsReduced {
+				require.Equal(t, -1, actual.meUnreducedRow)
+				require.Equal(t, -1, actual.meUnreducedColumn)
+			} else {
+				for i := 0; i < mNumRows; i++ {
+					var eIJ *bignumber.BigNumber
+					eIJ, err = e.Get(i, actual.meUnreducedColumn)
+					require.NoError(t, err)
+					if i == actual.meUnreducedColumn {
+						require.Zero(t, eIJ.Cmp(one))
+					} else {
+						require.Zero(t, eIJ.Cmp(zero))
+					}
+				}
+			}
 		}
 	}
 	fmt.Printf("Number of all zero columns calculated: %d / %d\n", numAllZeroColumnsCalculated, numTests)

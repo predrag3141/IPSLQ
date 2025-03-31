@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/predrag3141/IPSLQ/bigmatrix"
 	"github.com/predrag3141/IPSLQ/bignumber"
+	"math"
 )
 
 const (
@@ -40,9 +41,11 @@ type State struct {
 	solutionCount         int
 	hReductionCount       int // How many times H was row reduced by D
 	mReductionCount       int // How many times M was column reduced by E
+	mConsecutiveUnreduced int // Number of times in a row that m was not reduced by E
 	hIterationCount       int // How many times H was iterated on, with or without reduction
 	mIterationCount       int // How many times M was iterated on, with or without reduction
 	allZeroRowsCalculated int64
+	frobeniusNorm         float64
 }
 
 // NewState returns a new State from a provided decimal string array
@@ -68,6 +71,7 @@ func NewState(input []string) (*State, error) {
 		roundOffCurrentWeight: nil,
 		solutionCount:         0,
 		allZeroRowsCalculated: 0,
+		frobeniusNorm:         math.MaxFloat64,
 	}
 
 	// Initialize rawXB
@@ -148,7 +152,7 @@ func NewState(input []string) (*State, error) {
 // the matrix it is passed has one more row than column -- indicating it is
 // H -- or is square, which indicates that it is H.
 func (s *State) OneIteration(
-	getR func(*bigmatrix.BigMatrix) (*IntOperation, error),
+	getR func(*bigmatrix.BigMatrix) (*IntOperation, float64, error),
 	checkInvariantsOptional ...bool,
 ) (bool, error) {
 	// Initializations
@@ -181,10 +185,11 @@ func (s *State) OneIteration(
 	// Step 2 of this PSLQ iteration
 	//
 	// H was just row-reduced, or M was just column-reduced, depending on which
-	// phase the PSLQ algorithm is in.
+	// phase the PSLQ algorithm is in. In this step, a row or column operation is
+	// selected.
 	var intOperation *IntOperation
 	if s.m == nil {
-		intOperation, err = getR(s.h)
+		intOperation, _, err = getR(s.h) // Frobenius norm of H is not needed
 		if (err == nil) && (intOperation == nil) {
 			// It is here that the transition from H to M occurs. The function, transitionFromHtoM,
 			// performs this transition and signals whether to terminate (which is unlikely).
@@ -195,8 +200,20 @@ func (s *State) OneIteration(
 			}
 		}
 	} else {
-		intOperation, err = getR(s.m)
-		if (err == nil) && (intOperation == nil) {
+		// Frobenius norms of M (squared) are integers, since the norm of a column of M is the norm
+		// of the corresponding column of B, an integer matrix. Therefore, to detect an actual
+		// increase in the Frobenius norm of M, it is necessary and sufficient that the Frobenius
+		// norm increase by at least 0.5.
+		var frobeniusNorm float64
+		intOperation, frobeniusNorm, err = getR(s.m)
+		if frobeniusNorm > s.frobeniusNorm+0.5 {
+			return true, fmt.Errorf(
+				"OneIteration: FrobeniusNorm of M increased from %f to %f",
+				s.frobeniusNorm, frobeniusNorm,
+			)
+		}
+		s.frobeniusNorm = frobeniusNorm
+		if ((err == nil) && (intOperation == nil)) || (s.mConsecutiveUnreduced > 1) {
 			return true, nil
 		}
 	}
@@ -208,7 +225,8 @@ func (s *State) OneIteration(
 		return false, err
 	}
 
-	// Step 3 of this PSLQ iteration
+	// Step 3 of this PSLQ iteration, in which integer row or column operations are
+	// performed and corners are removed.
 	err = s.step3(intOperation, "OneIteration")
 	if err != nil {
 		return false, err
@@ -416,7 +434,7 @@ func (s *State) checkInvariants(caller string) error {
 		}
 	}
 
-	// Check that H has been row reduced or M has been column reduced, whichever is applicable.
+	// Check that H has been row reduced
 	var row, col int
 	if s.m == nil {
 		var hIsReduced bool
@@ -432,20 +450,6 @@ func (s *State) checkInvariants(caller string) error {
 		if !hIsReduced {
 			return fmt.Errorf("%s: H[%d][%d] is not reduced. H=\n%v",
 				caller, row, col, s.h,
-			)
-		}
-	} else {
-		var mIsReduced bool
-		mIsReduced, row, col, err = isColumnReduced(s.m, -10, "OneIteration")
-		if err != nil {
-			return fmt.Errorf(
-				"%s: error determining whether M is column reduced: %q",
-				caller, err.Error(),
-			)
-		}
-		if !mIsReduced {
-			return fmt.Errorf("%s: M[%d][%d] is not reduced. M=\n%v",
-				caller, row, col, s.m,
 			)
 		}
 	}
@@ -540,8 +544,11 @@ func (s *State) step1(caller string) error {
 		if err != nil {
 			return err
 		}
-		if !isIdentity {
+		if isIdentity {
+			s.mConsecutiveUnreduced++
+		} else {
 			s.mReductionCount++
+			s.mConsecutiveUnreduced = 0
 		}
 		_, err = s.d.InvertLowerTriangular(s.e)
 		if err != nil {
@@ -644,7 +651,7 @@ func (s *State) step3(intOperation *IntOperation, caller string) error {
 // transitionFromHtoM creates s.m as the inverse of H. Then it repeats step 1 and part of
 // step 2 to enable OneIteration to pick up where it paused to call transitionFromHtoM.
 func (s *State) transitionFromHtoM(
-	getR func(matrix *bigmatrix.BigMatrix) (*IntOperation, error), caller string,
+	getR func(matrix *bigmatrix.BigMatrix) (*IntOperation, float64, error), caller string,
 ) (*IntOperation, bool, error) {
 	caller = fmt.Sprintf("%s-transitionFromHtoM", caller)
 	var err error
@@ -660,7 +667,7 @@ func (s *State) transitionFromHtoM(
 	// M is now column-reduced.
 	terminationFlag := false
 	var intOperation *IntOperation
-	intOperation, err = getR(s.m)
+	intOperation, s.frobeniusNorm, err = getR(s.m)
 	if err != nil {
 		return nil, true, fmt.Errorf("%s: error in getR: %q", caller, err.Error())
 	}
