@@ -5,6 +5,8 @@ package pslqops
 import (
 	"fmt"
 	"github.com/predrag3141/IPSLQ/bigmatrix"
+	"github.com/predrag3141/IPSLQ/util"
+	"math"
 	"strings"
 	"testing"
 
@@ -90,7 +92,14 @@ func TestBestDiagonalRowOp(t *testing.T) {
 	)
 }
 
-func TestBestSwapInM(t *testing.T) {
+// intOpResults holds information needed in TestBestColumnOpInM for expected and actual results
+type intOpResults struct {
+	numIndices  int
+	intOp       *IntOperation
+	sortedNorms []float64
+}
+
+func TestBestColumnOpInM(t *testing.T) {
 	const (
 		// A narrow range of possible diagonal elements to put in M makes column swaps less
 		// likely to place a short column on the right-hand side of M.
@@ -98,57 +107,159 @@ func TestBestSwapInM(t *testing.T) {
 		maxDiagonalElementSize = 100
 		numRows                = 17
 		numTests               = 100
+		expectedIndex          = 0
+		actualIndex            = 1
+		log2tolerance          = -50
 
 		// Edge cases to count
-		columnOpWasNil             = "column op was nil"
-		leftmostColumnsDiffered    = "leftmost columns differed"
-		leftmostColumnsWereTheSame = "leftmost columns were the same"
+		columnOpWasNil      = "column op was nil"
+		numIndicesDiffer    = "number of indices in column operations differ"
+		indicesDiffer       = "indices in column operations differ"
+		operationsOnBDiffer = "operations on B differ"
 	)
 
 	edgeCaseCounts := make(map[string]int)
-	rightmostColumnCounts := make(map[int]int)
 	for testNbr := 0; testNbr < numTests; testNbr++ {
+		// Initializations
+		tolerance := math.Pow(2, log2tolerance)
+		results := []intOpResults{
+			{numIndices: 0, intOp: nil, sortedNorms: nil}, // expected
+			{numIndices: 0, intOp: nil, sortedNorms: nil}, // actual
+		}
+
 		// Get M and expected results
 		m, expected, err := createRandomM(
 			numRows, minDiagonalElementSize, maxDiagonalElementSize, []int{}, "TestBestSwapInM",
 		)
 		require.NoError(t, err)
-		if expected.bestColumnOp != nil {
-			require.True(t, expected.bestColumnOp.isPermutation())
-			require.Equal(t, 2, len(expected.bestColumnOp.Indices))
+		results[expectedIndex].intOp = expected.bestColumnOp
+		if results[expectedIndex].intOp != nil {
+			require.False(t, results[expectedIndex].intOp.isPermutation())
+			results[expectedIndex].numIndices = len(results[expectedIndex].intOp.Indices)
 		}
 
 		// Get actual results
-		var actualColumnOp *IntOperation
-		actualColumnOp, err = bestSwapInM(m, "TestBestSwapInM")
+		var mAsFloat64 []float64
+		mAsFloat64, err = m.AsFloat64()
 		require.NoError(t, err)
-		if actualColumnOp != nil {
-			require.True(t, actualColumnOp.isPermutation())
-			require.Equal(t, 2, len(actualColumnOp.Indices))
+		results[actualIndex].intOp, err = permutationOfM(mAsFloat64, m.NumRows(), "TestBestSwapInM")
+		require.NoError(t, err)
+		if results[actualIndex].intOp != nil {
+			require.False(t, results[actualIndex].intOp.isPermutation())
+			results[actualIndex].numIndices = len(results[actualIndex].intOp.Indices)
 		}
 
-		// The expected and actual right-most columns in the column operations should match
-		if (expected.bestColumnOp == nil) || (actualColumnOp == nil) {
-			edgeCaseCounts[columnOpWasNil]++
-			require.Nil(t, expected.bestColumnOp)
-			require.Nil(t, actualColumnOp)
-		} else {
-			require.Equal(t, expected.bestColumnOp.Indices[1], actualColumnOp.Indices[1])
-			rightmostColumnCounts[expected.bestColumnOp.Indices[1]]++
-			if expected.bestColumnOp.Indices[0] != actualColumnOp.Indices[0] {
-				edgeCaseCounts[leftmostColumnsDiffered]++
-			} else {
-				edgeCaseCounts[leftmostColumnsWereTheSame]++
+		// Compute column norms
+		columnNorms := make([]float64, numRows)
+		for j := 0; j < numRows; j++ {
+			for i := 0; i < numRows; i++ {
+				columnNorms[j] += mAsFloat64[i*numRows+j] * mAsFloat64[i*numRows+j]
 			}
 		}
+
+		// Handle nil column operations
+		if (results[expectedIndex].intOp == nil) || (results[actualIndex].intOp == nil) {
+			edgeCaseCounts[columnOpWasNil]++
+			require.Nil(t, results[expectedIndex].intOp)
+			require.Nil(t, results[actualIndex].intOp)
+
+			// If the column operations are nil, the column norms should be sorted
+			for j := 1; j < numRows; j++ {
+				require.LessOrEqual(
+					t, columnNorms[j], columnNorms[j-1]+tolerance,
+					"columnNorms[%d] = %f > %f = columnNorms[%d]",
+					j, columnNorms[j], columnNorms[j-1], j-1,
+				)
+			}
+			continue
+		}
+
+		// Check that the expected and actual integer operations sort the column norms.
+		for _, k := range []int{expectedIndex, actualIndex} {
+			// Initializations
+			expectedOrActual := "expected"
+			if k == actualIndex {
+				expectedOrActual = "actual"
+			}
+
+			// Create results[k].sortedNorms
+			results[k].sortedNorms = make([]float64, numRows)
+			for j := 0; j < numRows; j++ {
+				// If j is a fixed point of the permutation, results[k].sortedNorms[j]
+				// will remain untouched by the next block.
+				results[k].sortedNorms[j] = columnNorms[j]
+			}
+			for j := 0; j < results[k].numIndices; j++ {
+				for i := 0; i < results[k].numIndices; i++ {
+					if results[k].intOp.OperationOnB[i*results[k].numIndices+j] == 1 {
+						// Column results[k].intOp.Indices[i] is copied to column
+						// results[k].intOp.Indices[j].
+						src := results[k].intOp.Indices[i]
+						dest := results[k].intOp.Indices[j]
+						results[k].sortedNorms[dest] = columnNorms[src]
+					}
+				}
+			}
+
+			// Check that results[k].sortedNorms is sorted
+			for j := 1; j < numRows; j++ {
+				require.LessOrEqual(
+					t, results[k].sortedNorms[j], results[k].sortedNorms[j-1]+tolerance,
+					"results[%s].sortedNorms[%d] = %f > %f = results[%s].sortedNorms[%d]",
+					expectedOrActual, j, results[k].sortedNorms[j],
+					results[k].sortedNorms[j-1], expectedOrActual, j-1,
+				)
+			}
+
+			// The operations on B and A should be inverses of each other
+			var areInverses bool
+			operationOnB := util.CopyIntToInt64(results[k].intOp.OperationOnB)
+			operationOnA := util.CopyIntToInt64(results[k].intOp.OperationOnA)
+			areInverses, err = util.IsInversePair(operationOnB, operationOnA, results[k].numIndices)
+			require.NoError(t, err)
+			require.True(
+				t, areInverses, "%s operationOnB = %v %s operationOnA = %v",
+				expectedOrActual, operationOnB, expectedOrActual, operationOnA,
+			)
+		}
+
+		// In most cases, the expected and actual integer operations are actually equal.
+		// But it is not a bug for them to be different, provided that they both sort the
+		// column norms. Count these edge cases.
+		columnOpsDiffer := false
+		var numIndices int
+		if results[expectedIndex].numIndices != results[actualIndex].numIndices {
+			columnOpsDiffer = true
+		}
+		if columnOpsDiffer {
+			edgeCaseCounts[numIndicesDiffer]++
+		} else {
+			numIndices = results[expectedIndex].numIndices
+			for i := 0; i < numIndices; i++ {
+				if results[expectedIndex].intOp.Indices[i] != results[actualIndex].intOp.Indices[i] {
+					columnOpsDiffer = true
+					break
+				}
+			}
+		}
+		if columnOpsDiffer {
+			edgeCaseCounts[indicesDiffer]++
+		} else {
+			for i := 0; i < numIndices*numIndices; i++ {
+				if results[expectedIndex].intOp.OperationOnB[i] != results[actualIndex].intOp.OperationOnB[i] {
+					columnOpsDiffer = true
+					break
+				}
+			}
+		}
+		if columnOpsDiffer {
+			edgeCaseCounts[operationsOnBDiffer]++
+		}
+
 	}
 	t.Logf(
 		"Edge cases: %s\n",
 		strings.Replace(fmt.Sprintf("%v", edgeCaseCounts), "map", "", 1),
-	)
-	t.Logf(
-		"Rightmost columns: %s\n",
-		strings.Replace(fmt.Sprintf("%v", rightmostColumnCounts), "map", "", 1),
 	)
 }
 
@@ -171,6 +282,7 @@ func TestPerformRowOp(t *testing.T) {
 				rowOpAsIntOperation, rowOpAsMatrix, _, err := getRandomIntOperation(
 					numRows, numCols, rowOpType, involveLastRow, "TestPerformRowOp",
 				)
+				require.NoError(t, err)
 				if involveLastRow {
 					require.Equal(t, 2, len(rowOpAsIntOperation.Indices))
 					require.Equal(t, numRows-1, rowOpAsIntOperation.Indices[1])
@@ -210,6 +322,7 @@ func TestPerformColumnOp(t *testing.T) {
 			columnOpAsIntOperation, _, columnOpAsMatrix, err := getRandomIntOperation(
 				numRows, numRows, columnOpType, false, "TestPerformColumnOp",
 			)
+			require.NoError(t, err)
 			require.LessOrEqual(t, len(columnOpAsIntOperation.Indices), numRows)
 			require.GreaterOrEqual(t, len(columnOpAsIntOperation.Indices), 2)
 			actualM, _, err = createRandomM(

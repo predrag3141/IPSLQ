@@ -33,7 +33,7 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 	one := bignumber.NewFromInt64(1)
 	zero := bignumber.NewFromInt64(0)
 	half := bignumber.NewPowerOfTwo(-1)
-	isIdentity := true
+	isIdentityMatrix := true
 	calculatedAllZeroRow := false
 	columnThresh, err := getColumnThresholds(h, caller)
 
@@ -54,7 +54,7 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 		// Set the diagonal element to 1.
 		err = d.Set(i, i, one)
 		if err != nil {
-			return isIdentity, calculatedAllZeroRow,
+			return isIdentityMatrix, calculatedAllZeroRow,
 				fmt.Errorf("%s: could not set D[%d][%d]: %q", caller, i, i, err.Error())
 		}
 
@@ -63,7 +63,7 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 		if i > 0 {
 			reduceRow, _, err = rowNeedsReduction(h, columnThresh, i, 0, caller)
 			if err != nil {
-				return isIdentity, calculatedAllZeroRow, fmt.Errorf(
+				return isIdentityMatrix, calculatedAllZeroRow, fmt.Errorf(
 					"%s: could not determine whether row %d needs reduction: %q",
 					caller, i, err.Error(),
 				)
@@ -75,7 +75,7 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 			for j := 0; j < i; j++ {
 				err = d.Set(i, j, zero)
 				if err != nil {
-					return isIdentity, calculatedAllZeroRow,
+					return isIdentityMatrix, calculatedAllZeroRow,
 						fmt.Errorf("%s: could not set D[%d][%d]: %q", caller, i, j, err.Error())
 				}
 			}
@@ -95,12 +95,12 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 				var dIK, hKJ *bignumber.BigNumber
 				dIK, err = d.Get(i, k)
 				if err != nil {
-					return isIdentity, calculatedAllZeroRow,
+					return isIdentityMatrix, calculatedAllZeroRow,
 						fmt.Errorf("%s: could not get D[%d][%d]: %q", caller, i, k, err.Error())
 				}
 				hKJ, err = h.Get(k, j)
 				if err != nil {
-					return isIdentity, calculatedAllZeroRow,
+					return isIdentityMatrix, calculatedAllZeroRow,
 						fmt.Errorf("%s: could not get H[%d][%d]: %q", caller, k, j, err.Error())
 				}
 				dIKhKJ := bignumber.NewFromInt64(0).Mul(dIK, hKJ)
@@ -116,14 +116,14 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 			}
 			dEntry.RoundTowardsZero()
 			if !dEntry.IsZero() {
-				isIdentity = false
+				isIdentityMatrix = false
 				rowIsAllZero = false
 			}
 
 			// Set D[i][j]
 			err = d.Set(i, j, dEntry)
 			if err != nil {
-				return isIdentity, calculatedAllZeroRow,
+				return isIdentityMatrix, calculatedAllZeroRow,
 					fmt.Errorf("%s: could not set D[%d][%d]: %q", caller, i, j, err.Error())
 			}
 		}
@@ -134,11 +134,11 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 			calculatedAllZeroRow = true
 		}
 	}
-	return isIdentity, calculatedAllZeroRow, nil
+	return isIdentityMatrix, calculatedAllZeroRow, nil
 }
 
-// getE returns a row operation matrix, E, that reduces a lower quadrangular
-// matrix like the matrix H in the original PSLQ paper. It returns
+// getE returns a row operation matrix, E, that reduces a lower triangular matrix like
+// the matrix M, the invers of the matrix H from the original PSLQ paper. It returns
 //
 // - Whether the reduction matrix is the identity
 //
@@ -148,8 +148,14 @@ func getD(h *bigmatrix.BigMatrix, d *bigmatrix.BigMatrix, caller string) (bool, 
 //
 // - Any error encountered.
 //
-// Entries to the left of the diagonal of ME are bounded by the absolute value of the diagonal
-// element to their right, multiplied by .5.
+// The reduction satisfies one of two criteria for each column of M:
+//
+//   - Entries to the left of the diagonal of ME are bounded by the absolute value of
+//     the diagonal element to their right, multiplied by .5.
+//
+//   - However, if column j of ME would have a greater Euclidean norm than column j of M,
+//     if the first criterion were applied, then column j of ME is left unreduced, i.e.
+//     equal to column j of M.
 func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, bool, error) {
 	// Initializations
 	caller = fmt.Sprintf("%s-getE", caller)
@@ -158,18 +164,9 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 	one := bignumber.NewFromInt64(1)
 	zero := bignumber.NewFromInt64(0)
 	half := bignumber.NewPowerOfTwo(-1)
-	isIdentity := true
+	isIdentityMatrix := true
 	calculatedAllZeroColumn := false
 	rowThresh, err := getRowThresholds(m, caller)
-
-	// M and E are square matrices, with one more row and column in E than in M.
-	// The bottom row and right-most column of E have zeroes off the diagonal and one
-	// on the diagonal.
-	err = e.Set(eNumRows-1, eNumRows-1, one)
-	if err != nil {
-		return true, false,
-			fmt.Errorf("%s: could not set E[%d][%d]: %q", caller, eNumRows-1, eNumRows-1, err.Error())
-	}
 
 	// Get 1/M[i][i] for all i
 	reciprocalDiagonal := make([]*bignumber.BigNumber, mNumRows)
@@ -183,20 +180,46 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 		reciprocalDiagonal[i], err = bignumber.NewFromInt64(0).Quo(one, mII)
 	}
 
-	// Compute the E[i][j] for i, j < mNumRows (not the bottom row and right-most column of E)
+	// Zero out the bottom row and right-most column of E, except for the bottom right entry,
+	// which is 1.
+	for i := 0; i < eNumRows-1; i++ {
+		err = e.Set(eNumRows-1, i, zero)
+		if err != nil {
+			return true, false,
+				fmt.Errorf("%s: could not set E[%d][%d] to 0: %q", caller, eNumRows-1, i, err.Error())
+		}
+		err = e.Set(i, eNumRows-1, zero)
+		if err != nil {
+			return true, false,
+				fmt.Errorf("%s: could not set E[%d][%d] to 0: %q", caller, i, eNumRows-1, err.Error())
+		}
+	}
+	err = e.Set(eNumRows-1, eNumRows-1, one)
+	if err != nil {
+		return true, false,
+			fmt.Errorf("%s: could not set E[%d][%d] to 1: %q", caller, eNumRows-1, eNumRows-1, err.Error())
+	}
+
+	// From here on, the only part of E that is modified in this function is the first mNumRows
+	// rows and columns. Compute the E[i][j] for i, j < mNumRows (not the bottom row and right-most
+	// column of E)
 	for j := mNumRows - 1; 0 <= j; j-- {
+		// Flag indicating that column j of E has 0s off its diagonal and 1 on its diagonal, after
+		// taking the possibility of reverting the column to this state is taken into account.
+		isIdentityColumn := true
+
 		// Set the diagonal element to 1. Also, zero out the entries above the diagonal, because
 		// there is no guarantee that E comes into this function as a lower-triangular matrix.
 		err = e.Set(j, j, one)
 		if err != nil {
-			return isIdentity, calculatedAllZeroColumn,
+			return isIdentityMatrix, calculatedAllZeroColumn,
 				fmt.Errorf("%s: could not set E[%d][%d]: %q", caller, j, j, err.Error())
 		}
 		for i := 0; i < j; i++ {
 			err = e.Set(i, j, zero)
 			if err != nil {
-				return isIdentity, calculatedAllZeroColumn,
-					fmt.Errorf("%s: could not set E[%d][%d]: %q", caller, i, j, err.Error())
+				return isIdentityMatrix, calculatedAllZeroColumn,
+					fmt.Errorf("%s: could not set E[%d][%d] to 0: %q", caller, i, j, err.Error())
 			}
 		}
 
@@ -205,7 +228,7 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 		if j < (mNumRows - 1) {
 			reduceColumn, _, err = columnNeedsReduction(m, rowThresh, j, 0, caller)
 			if err != nil {
-				return isIdentity, calculatedAllZeroColumn, fmt.Errorf(
+				return isIdentityMatrix, calculatedAllZeroColumn, fmt.Errorf(
 					"%s: could not determine whether column %d needs reduction: %q",
 					caller, j, err.Error(),
 				)
@@ -217,14 +240,17 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 			for i := j + 1; i < mNumRows; i++ {
 				err = e.Set(i, j, zero)
 				if err != nil {
-					return isIdentity, calculatedAllZeroColumn,
+					return isIdentityMatrix, calculatedAllZeroColumn,
 						fmt.Errorf("%s: could not set E[%d][%d]: %q", caller, i, j, err.Error())
 				}
 			}
 			continue
 		}
 
-		// Column j needs reduction
+		// Column j needs reduction, but reduction will take place only if column j of the
+		// resulting matrix, ME, has a lower norm than column j of M.
+		columnNormSqInM := bignumber.NewFromInt64(0)
+		columnNormSqInME := bignumber.NewFromInt64(0)
 		columnIsAllZero := true
 		for i := j + 1; i < mNumRows; i++ {
 			// Initially, compute the entry in E, except not rounded to the nearest integer.
@@ -236,20 +262,30 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 				var mIK, eKJ *bignumber.BigNumber
 				mIK, err = m.Get(i, k)
 				if err != nil {
-					return isIdentity, calculatedAllZeroColumn,
+					return isIdentityMatrix, calculatedAllZeroColumn,
 						fmt.Errorf("%s: could not get M[%d][%d]: %q", caller, i, k, err.Error())
 				}
 				eKJ, err = e.Get(k, j)
 				if err != nil {
-					return isIdentity, calculatedAllZeroColumn,
+					return isIdentityMatrix, calculatedAllZeroColumn,
 						fmt.Errorf("%s: could not get E[%d][%d]: %q", caller, k, j, err.Error())
 				}
 				mIKeKJ := bignumber.NewFromInt64(0).Mul(mIK, eKJ)
 				eEntry.Sub(eEntry, mIKeKJ)
+				if k == j {
+					// M[i][j] is handy for incorporating into the norm of column j of M
+					columnNormSqInM.MulAdd(mIK, mIK)
+				}
 			}
-			eEntry.Mul(eEntry, reciprocalDiagonal[i])
 
-			// Next, round the entry to the nearest integer.
+			// ME[i][j] = sum(M[i][k] E[k][j]) from k = j through i, because for k < j, E[k][j] = 0,
+			// and for k > i, M[i][k] = 0. Therefore, meIJ = ME[i][j] can conveniently be initialized
+			// here as -eEntry. This excludes the last term in ME[i][j], namely M[i][i] E[i][j],
+			// until a bit further down in this function, when E[i][j] is known.
+			meIJ := bignumber.NewFromInt64(0).Sub(zero, eEntry)
+
+			// Divide the current form of E[i][j] by M[i][i] and round to the nearest integer.
+			eEntry.Mul(eEntry, reciprocalDiagonal[i])
 			if eEntry.Cmp(zero) > 0 {
 				eEntry.Add(eEntry, half)
 			} else {
@@ -257,25 +293,55 @@ func getE(m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, caller string) (bool, 
 			}
 			eEntry.RoundTowardsZero()
 			if !eEntry.IsZero() {
-				isIdentity = false
+				isIdentityColumn = false
 				columnIsAllZero = false
 			}
 
 			// Set E[i][j]
 			err = e.Set(i, j, eEntry)
 			if err != nil {
-				return isIdentity, calculatedAllZeroColumn,
+				return isIdentityMatrix, calculatedAllZeroColumn,
 					fmt.Errorf("%s: could not set E[%d][%d]: %q", caller, i, j, err.Error())
 			}
+
+			// Update the column norm in ME. Currently, meIJ equals the sum of M[i][k] E[k][j]
+			// from k = j through i-1. Add in the term for k = i, namely M[i][i] E[i][j]. eEntry
+			// was just set to E[i][j], so use that.
+			var mII *bignumber.BigNumber
+			mII, err = m.Get(i, i)
+			if err != nil {
+				return isIdentityMatrix, calculatedAllZeroColumn,
+					fmt.Errorf("%s: could not get M[%d][%d]: %q", caller, i, i, err.Error())
+			}
+			meIJ.MulAdd(mII, eEntry)
+			columnNormSqInME.MulAdd(meIJ, meIJ)
 		}
+
 		if columnIsAllZero {
 			// Since this column of M needed reduction, it should be reported that this
 			// column has only zeroes (other than the diagonal element, of course).
 			// This is not an error, since it can happen due to round-off.
 			calculatedAllZeroColumn = true
 		}
+		if columnNormSqInM.Cmp(columnNormSqInME) < 0 {
+			// Revert column j in E to the identity, because it actually *increases* the norm
+			// of column j in M
+			for i := j + 1; i < mNumRows; i++ {
+				err = e.Set(i, j, zero)
+				if err != nil {
+					return isIdentityMatrix, calculatedAllZeroColumn,
+						fmt.Errorf("%s: could not set E[%d][%d] to zero: %q", caller, i, j, err.Error())
+				}
+			}
+			isIdentityColumn = true
+		}
+
+		// By now, isIdentityColumn can be relied on
+		if !isIdentityColumn {
+			isIdentityMatrix = false
+		}
 	}
-	return isIdentity, calculatedAllZeroColumn, nil
+	return isIdentityMatrix, calculatedAllZeroColumn, nil
 }
 
 // getColumnThresholds returns the maximum absolute value in each column of H

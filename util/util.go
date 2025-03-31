@@ -4,7 +4,6 @@ package util
 
 import (
 	"fmt"
-	"github.com/predrag3141/PSLQ/util"
 	"math"
 )
 
@@ -26,12 +25,35 @@ func CopyIntToInt64(input []int) []int64 {
 	return retVal
 }
 
+// MultiplyFloatInt returns the matrix product, x * y, for []float64
+// x and []int64 y
+func MultiplyFloatInt(x []float64, y []int, n int) ([]float64, error) {
+	// x is mxn, y is nxp and xy is mxp.
+	m, p, err := getDimensions(len(x), len(y), n, "MultiplyFloatInt")
+	if err != nil {
+		return []float64{}, err
+	}
+	xy := make([]float64, m*p)
+	for i := 0; i < m; i++ {
+		for j := 0; j < p; j++ {
+			xy[i*p+j] = x[i*n] * float64(y[j]) // x[i][0] * y[0][j]
+			for k := 1; k < n; k++ {
+				xy[i*p+j] += x[i*n+k] * float64(y[k*p+j]) // x[i][k] * y[k][j]
+			}
+		}
+	}
+	return xy, nil
+}
+
 // MultiplyIntInt returns the matrix product, x * y, for []int64
 // x and []int64 y. n must equal the number of columns in x and
 // the number of rows in y.
 func MultiplyIntInt(x []int64, y []int64, n int) ([]int64, error) {
 	// x is mxn, y is nxp and xy is mxp.
-	m, p, err := getDimensions(len(x), len(y), n)
+	m, p, err := getDimensions(len(x), len(y), n, "MultiplyIntInt")
+	if err != nil {
+		return nil, err
+	}
 	largeEntryThresh := int64(math.MaxInt32 / m)
 	if err != nil {
 		return []int64{}, err
@@ -57,10 +79,10 @@ func MultiplyIntInt(x []int64, y []int64, n int) ([]int64, error) {
 
 // IsInversePair returns whether x and y are inverses of each other
 func IsInversePair(x, y []int64, dim int) (bool, error) {
-	shouldBeInverse, err := util.MultiplyIntInt(x, y, dim)
+	shouldBeInverse, err := MultiplyIntInt(x, y, dim)
 	if err != nil {
 		return false, fmt.Errorf(
-			"could not multiply x (%d-long) by y (%d-long): %q", len(x), len(y), err.Error(),
+			"IsInversePair: could not multiply x (%d-long) by y (%d-long): %q", len(x), len(y), err.Error(),
 		)
 	}
 	for i := 0; i < dim; i++ {
@@ -125,12 +147,17 @@ func GetPermutationMatrices(indices, perm []int, numRows int) ([]int64, []int64,
 // getDimensions returns the dimensions m and p for a matrix multiply
 // xy where x has mn entries, y has np entries, and the number of columns
 // in x (= the number of rows in y) is n.
-func getDimensions(mn, np, n int) (int, int, error) {
+func getDimensions(mn, np, n int, caller string) (int, int, error) {
+	caller = fmt.Sprintf("%s-getDimensions", caller)
 	if mn%n != 0 {
-		return 0, 0, fmt.Errorf("multiplyIntFloat: non-integer number of rows %d / %d in x", mn, n)
+		return 0, 0, fmt.Errorf(
+			"%s: multiplyIntFloat: non-integer number of rows %d / %d in x", caller, mn, n,
+		)
 	}
 	if np%n != 0 {
-		return 0, 0, fmt.Errorf("multiplyIntFloat: non-integer number of columns  %d / %d in y", np, n)
+		return 0, 0, fmt.Errorf(
+			"%s: multiplyIntFloat: non-integer number of columns  %d / %d in y", caller, np, n,
+		)
 	}
 	return mn / n, np / n, nil
 }

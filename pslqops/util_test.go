@@ -9,6 +9,7 @@ import (
 	"github.com/predrag3141/IPSLQ/util"
 	"math"
 	"math/rand"
+	"sort"
 )
 
 const (
@@ -889,41 +890,88 @@ func createRandomM(
 	ratio = math.Abs(float64(diagonal[numRows-1])) / minDiagonalElement
 	retVal.diagonalStatistics.Ratio = &ratio
 
-	// To prepare for finding the best column swap, compute norms for each column.
-	norms := make([]float64, numRows)
+	// To prepare for finding the best column operation, compute norms for each column.
+	columnNorms := make([]float64, numRows)
 	for j := 0; j < numRows; j++ {
 		for i := j; i < numRows; i++ {
-			norms[j] += float64(mEntries[i*numRows+j] * mEntries[i*numRows+j])
+			columnNorms[j] += float64(mEntries[i*numRows+j] * mEntries[i*numRows+j])
 		}
 	}
 
-	// Iterate through right-most columns, indexed by j1, looking for one that can be swapped
-	// out. If there is one, swap it with the lowest-norm column. At each iteration, norms
-	// involve rows 0,1,...,j1-1.
-	for j1 := numRows - 1; j1 > 0; j1-- {
-		bestNorm := norms[j1]
-		bestIndex := -1
-		for j0 := 0; j0 < j1; j0++ {
-			// Update bestNorm and bestIndex
-			if norms[j0] < bestNorm {
-				bestNorm = norms[j0]
-				bestIndex = j0
-			}
+	// Sort the columns by norm and verify the ordering works
+	sortedOrder := make([]int, numRows)
+	for i := range sortedOrder {
+		sortedOrder[i] = i
+	}
+	sort.Slice(sortedOrder, func(i, j int) bool {
+		return columnNorms[sortedOrder[i]] > columnNorms[sortedOrder[j]]
+	})
+	for i := 1; i < numRows; i++ {
+		if columnNorms[sortedOrder[i-1]] < columnNorms[sortedOrder[i]] {
+			return m, nil, fmt.Errorf(
+				"%s: column norms %v with order %v were not sorted at indices %d and %d",
+				caller, columnNorms, sortedOrder, i-1, i,
+			)
+		}
+	}
 
-			// Prepare for the next loop by subtracting row j1 from the norms, so
-			// the norms involve only rows 0,1,...,j1-1
-			norms[j0] -= float64(mEntries[j1*numRows+j0] * mEntries[j1*numRows+j0])
-		}
-		if 0 <= bestIndex {
-			retVal.bestColumnOp = &IntOperation{
-				Indices:        []int{bestIndex, j1},
-				OperationOnA:   []int{},
-				OperationOnB:   []int{},
-				PermutationOfA: [][]int{{0, 1}},
-				PermutationOfB: [][]int{{0, 1}},
+	// Create a full permutation matrix, fullOperationOnB, and check that right-multiplying
+	// by it sorts columnNorms.
+	fullOperationOnB := make([]int, numRows*numRows)
+	for i := 0; i < numRows; i++ {
+		fullOperationOnB[sortedOrder[i]*numRows+i] = 1
+	}
+	var shouldBeSorted []float64
+	shouldBeSorted, err = util.MultiplyFloatInt(columnNorms, fullOperationOnB, numRows)
+	for j := 1; j < numRows; j++ {
+		if shouldBeSorted[j] > shouldBeSorted[j-1] {
+			var fullOperationOnBAsStr string
+			for i := 0; i < numRows; i++ {
+				fullOperationOnBAsStr = fmt.Sprintf(
+					"%s\n%v", fullOperationOnBAsStr, fullOperationOnB[i*numRows:(i+1)*numRows],
+				)
 			}
-			break
+			return m, nil, fmt.Errorf(
+				"%s: permutation matrix %s does not sort norms %v at indices %d and %d",
+				caller, fullOperationOnBAsStr, columnNorms, j-1, j,
+			)
 		}
+	}
+
+	// Exclude fixed points from fullOperationOnB to create retVal.bestColumnOp.OperationOnB.
+	// Along the way, Indices and OperationOnA are created.
+	numIndices := 0
+	for i := 0; i < numRows; i++ {
+		if sortedOrder[i] != i {
+			numIndices++
+		}
+	}
+	retVal.bestColumnOp = &IntOperation{
+		Indices:        make([]int, numIndices),
+		OperationOnB:   make([]int, numIndices*numIndices),
+		OperationOnA:   make([]int, numIndices*numIndices),
+		PermutationOfB: [][]int{},
+		PermutationOfA: [][]int{},
+	}
+	for i, cursor := 0, 0; i < numRows; i++ {
+		if sortedOrder[i] != i {
+			retVal.bestColumnOp.Indices[cursor] = i
+			cursor++
+		}
+	}
+	for i, iCursor := 0, 0; i < numRows; i++ {
+		if sortedOrder[i] == i {
+			continue
+		}
+		for j, jCursor := 0, 0; j < numRows; j++ {
+			if sortedOrder[j] == j {
+				continue
+			}
+			retVal.bestColumnOp.OperationOnB[iCursor*numIndices+jCursor] = fullOperationOnB[i*numRows+j]
+			retVal.bestColumnOp.OperationOnA[jCursor*numIndices+iCursor] = fullOperationOnB[i*numRows+j]
+			jCursor++
+		}
+		iCursor++
 	}
 	return m, retVal, nil
 }

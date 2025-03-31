@@ -90,15 +90,19 @@ type PSLQContext struct {
 	MaxXBasedOnSphereVolume float64   `json:"max_x_based_on_sphere_volume"`
 
 	// Computed by PSLQ or after running PSLQ
-	Solutions                       [][]int64 `json:"solutions"`
-	SolutionCount                   int       `json:"solution_count"`
-	FoundRelation                   bool      `json:"found_relation"`
-	IterationsBeforeInverting       int       `json:"iterations_before_inverting"`
-	IterationsAfterInverting        int       `json:"iterations_after_inverting"`
-	IterationsBeforeFindingRelation int       `json:"iterations_before_finding_relation"`
-	TotalIterations                 int       `json:"total_iterations"`
-	ReductionsBeforeInverting       int       `json:"reductions_before_inverting"`
-	ReductionsAfterInverting        int       `json:"reductions_after_inverting"`
+	Solutions                       []string `json:"solutions"`
+	SolutionCount                   int      `json:"solution_count"`
+	FoundRelation                   bool     `json:"found_relation"`
+	IterationsBeforeInverting       int      `json:"iterations_before_inverting"`
+	IterationsAfterInverting        int      `json:"iterations_after_inverting"`
+	IterationsBeforeFindingRelation int      `json:"iterations_before_finding_relation"`
+	TotalIterations                 int      `json:"total_iterations"`
+	ReductionsBeforeInverting       int      `json:"reductions_before_inverting"`
+	ReductionsAfterInverting        int      `json:"reductions_after_inverting"`
+	BestSolutionNorm                float64  `json:"best_solution_norm"`
+	WorstSolutionNorm               float64  `json:"worst_solution_norm"`
+	BestSolutionOverRelationNorm    float64  `json:"best_solution_over_relation_norm"`
+	WorstOverBestSolutionNorm       float64  `json:"worst_over_best_solution_norm"`
 }
 
 // NewPSLQContext returns input to PSLQ of length xLen with a known solution, m, that PSQL is
@@ -147,7 +151,7 @@ func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 	// Check solutions to see if any matches pc.Relation
 	if setSolutions {
 		// This call to UpdateSolutions overwrites any previous solutions
-		pc.Solutions = [][]int64{}
+		pc.Solutions = []string{}
 	}
 	for j := 0; j < state.NumRows(); j++ {
 		// Set solutions
@@ -169,10 +173,27 @@ func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 			pc.IterationsBeforeFindingRelation = pc.TotalIterations
 		}
 		if setSolutions {
-			pc.Solutions = append(pc.Solutions, putativeSolution)
+			pc.Solutions = append(pc.Solutions, fmt.Sprintf("%v", putativeSolution))
+		}
+
+		// Update the best and worst solution norms
+		norm := solutionNorm(putativeSolution)
+		if len(pc.Solutions) == 0 {
+			pc.BestSolutionNorm = norm
+			pc.WorstSolutionNorm = norm
+		}
+		if pc.BestSolutionNorm > norm {
+			pc.BestSolutionNorm = norm
+		}
+		if pc.WorstSolutionNorm < norm {
+			pc.WorstSolutionNorm = norm
 		}
 	}
 	pc.SolutionCount = len(pc.Solutions)
+	if (pc.BestSolutionNorm > 0) && (pc.SolutionCount > 0) {
+		pc.WorstOverBestSolutionNorm = pc.WorstSolutionNorm / pc.BestSolutionNorm
+		pc.BestSolutionOverRelationNorm = pc.BestSolutionNorm / pc.RelationNorm
+	}
 	return nil
 }
 
@@ -253,4 +274,13 @@ func sphereVolume(radius float64, dim int) float64 {
 	dimAsFloat64 := float64(dim)
 	return (1.0 / math.Sqrt(dimAsFloat64*math.Pi)) *
 		math.Pow(twoPiE/dimAsFloat64, 0.5*dimAsFloat64) * math.Pow(radius, dimAsFloat64)
+}
+
+func solutionNorm(solution []int64) float64 {
+	solutionLen := len(solution)
+	var normSq float64
+	for i := 0; i < solutionLen; i++ {
+		normSq += float64(solution[i]) * float64(solution[i])
+	}
+	return math.Sqrt(normSq)
 }

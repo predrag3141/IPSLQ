@@ -7,6 +7,7 @@ import (
 	"github.com/predrag3141/IPSLQ/bigmatrix"
 	"github.com/predrag3141/IPSLQ/bignumber"
 	"math"
+	"sort"
 )
 
 // IntOperation holds the information necessary to perform an integer operation
@@ -35,6 +36,9 @@ type IntOperation struct {
 //
 // - A nil column operation indicates that the entire algorithm should be terminated.
 //
+//   - The returned float64 is the Frobenius norm of M, which the PSLQ algorithm should
+//     guarantee to be non-increasing.
+//
 // # If hOrM is not square, it must be H and
 //
 // - The returned operation (if non-nil) is a row operation to be performed on H.
@@ -43,29 +47,48 @@ type IntOperation struct {
 //     and H has all zeroes in its last row. In this situation, it is time for the calling
 //     function to set M equal to the inverse of H (excluding its all-zero bottom row)
 //     and proceed with m != nil on the next call to NextIntOp.
-func NextIntOp(hOrM *bigmatrix.BigMatrix) (*IntOperation, error) {
+//
+//   - The returned float64 is zero, as the Frobenius norm of H is not needed to detect
+//     termination conditions.
+func NextIntOp(hOrM *bigmatrix.BigMatrix) (*IntOperation, float64, error) {
 	if hOrM.NumRows() == hOrM.NumCols() {
 		// hOrM is M
-		return bestSwapInM(hOrM, "NextIntOp")
+		var retVal *IntOperation
+		mAsFloat64, err := hOrM.AsFloat64()
+		if err != nil {
+			return nil, 0, fmt.Errorf("NextIntOp: could not convert M to float64: %q", err)
+		}
+		retVal, err = permutationOfM(mAsFloat64, hOrM.NumRows(), "NextIntOp")
+		var frobeniusNorm float64
+		for i := 0; i < hOrM.NumRows(); i++ {
+			rowStart := i * hOrM.NumRows()
+			for j := 0; j <= i; j++ {
+				entry := mAsFloat64[rowStart+j]
+				frobeniusNorm += entry * entry
+			}
+		}
+		return retVal, frobeniusNorm, nil
 	}
 
 	// hOrM is H
 	const log2threshold = -20 // limits reductions using the last row to a factor of about 2^20
 	diagonalRowOp, err := bestDiagonalRowOpInH(hOrM, "NextIntOp")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if diagonalRowOp != nil {
-		return diagonalRowOp, nil
+		return diagonalRowOp, 0, nil
 	}
 	brh, err := getBottomRightOfH(hOrM, "NextIntOp")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if brh.Found {
-		return brh.reduce(1<<(-log2threshold), log2threshold, "NextIntOp")
+		var retVal *IntOperation
+		retVal, err = brh.reduce(1<<(-log2threshold), log2threshold, "NextIntOp")
+		return retVal, 0, nil
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
 // bestDiagonalRowOpInH returns the row swap on H is that increases the bottom-right entry
@@ -214,71 +237,93 @@ func bestDiagonalRowOpInH(h *bigmatrix.BigMatrix, caller string) (*IntOperation,
 	return bestRowOp, nil
 }
 
-// bestSwapInM returns a column operation for swapping a pair of columns of M
-// such that
-//
-//   - The swap, followed by corner removal, decreases the diagonal entry in
-//     the right-hand column
-//
-// - The right-hand column is as close to the right of M as possible
-//
-// - The left-hand column is as close to the right-hand column as possible
-//
-// If no column swap in M meets the first criterion, bestSwapInM returns nil.
-// If an error occurs, bestSwapInM returns the error and a nil IntOperation.
-func bestSwapInM(m *bigmatrix.BigMatrix, caller string) (*IntOperation, error) {
+// permutationOfM returns a column operation that sorts the columns of M
+// by their Euclidean lengths. If this turns out to be the identity, a nil
+// column operation is returned.
+func permutationOfM(mAsFloat64 []float64, numRows int, caller string) (*IntOperation, error) {
 	// Initialize mSq, a float64 copy of M but with entries squared
 	caller = fmt.Sprintf("%s-bestSwapInM", caller)
-	numRows := m.NumRows()
 	columnNorms := make([]float64, numRows)
-	mSq, err := m.AsFloat64() // currently not the squares of the entries but soon will be
-	if err != nil {
-		return nil, fmt.Errorf("%s: could not convert M to float64: %q", caller, err)
-	}
 	for i := 0; i < numRows; i++ {
 		for j := 0; j <= i; j++ {
-			entrySq := mSq[i*numRows+j] * mSq[i*numRows+j]
-			mSq[i*numRows+j] = entrySq
-			columnNorms[j] += entrySq
+			entry := mAsFloat64[i*numRows+j]
+			columnNorms[j] += entry * entry
 		}
 	}
 
-	// The right index of the column pair returned should be as far to the right in M as
-	// possible, so start at the right-most column of M.
-	for j1 := numRows - 1; 0 < j1; j1-- {
-		// Iterate through columns to the left of j1 looking for the shortest column. To save
-		// time on updates, start from the right because the most likely case is that the minimum
-		// column is near j1, since those are the shortest candidate columns.
-		minColumnNorm := columnNorms[j1]
-		columnWithMinNorm := j1
-		for j0 := j1 - 1; 0 <= j0; j0-- {
-			// Update min column norm
-			if columnNorms[j0] < minColumnNorm {
-				minColumnNorm = columnNorms[j0]
-				columnWithMinNorm = j0
-			}
+	// Create a slice of sortedOrder
+	sortedOrder := make([]int, numRows)
+	for i := range sortedOrder {
+		sortedOrder[i] = i
+	}
 
-			// Update column norms for the next iteration of j1. This is only necessary if
-			// there might be no column swap involving j1.
-			if columnWithMinNorm == j1 {
-				// It still might be necessary to continue the j1 loop, so update this column
-				// norm for the next iteration of j1.
-				columnNorms[j0] -= mSq[j1*numRows+j0]
-			}
+	// Sort the sortedOrder so that sortedOrder[i] is the index of the ith-longest column
+	// of M. The anonymous "less" function tells sort.Slice to rank longer columns
+	// lower than shorter columns.
+	sort.Slice(sortedOrder, func(i, j int) bool {
+		return columnNorms[sortedOrder[i]] > columnNorms[sortedOrder[j]]
+	})
+
+	// Count the number of non-fixed-points in the permutation, which determines
+	// the size of the Indices array and the permutation matrices.
+	numIndices := 0
+	for i := 0; i < numRows; i++ {
+		if sortedOrder[i] != i {
+			numIndices++
 		}
-		if columnWithMinNorm < j1 {
-			return &IntOperation{
-				Indices:        []int{columnWithMinNorm, j1},
-				OperationOnA:   []int{},
-				OperationOnB:   []int{},
-				PermutationOfA: [][]int{{0, 1}},
-				PermutationOfB: [][]int{{0, 1}},
-			}, nil
+	}
+	if numIndices == 0 {
+		return nil, nil
+	}
+
+	// Create an empty return value
+	retVal := &IntOperation{
+		Indices:        make([]int, numIndices),
+		OperationOnB:   make([]int, numIndices*numIndices),
+		OperationOnA:   make([]int, numIndices*numIndices),
+		PermutationOfB: [][]int{},
+		PermutationOfA: [][]int{},
+	}
+
+	// Set the Indices array
+	for i, cursor := 0, 0; i < numRows; i++ {
+		if i != sortedOrder[i] {
+			retVal.Indices[cursor] = i
+			cursor++
 		}
 	}
 
-	// No column swap increases the bottom-right entry of a pair of diagonal elements
-	return nil, nil
+	// Create a reverse lookup from retVal.Indices[i] to i
+	reverseLookup := make([]int, numRows)
+	for i := 0; i < numRows; i++ {
+		reverseLookup[i] = -1
+	}
+	for i := 0; i < numIndices; i++ {
+		reverseLookup[retVal.Indices[i]] = i
+	}
+
+	// Populate the operations on M and B and on H and A
+	for i := 0; i < numIndices; i++ {
+		// in the expansion of retVal.OperationOnB  to a numRows by numRows matrix, the
+		// column retVal.Indices[i] moves column sortedOrder[retVal.Indices[i]] to column
+		// retVal.Indices[i]. This means putting a 1 in row sortedOrder[retVal.Indices[i]].
+		//
+		// Translated to the indexing of retVal.Indices, the 1 in column i appears
+		// in row reverseLookup[sortedOrder[retVal.Indices[i]]].
+		//
+		// Since retVal.OperationOnB is an orthogonal matrix, its inverse is its transpose.
+		// Therefore, the role of row and column are reversed in retVal.OperationOnA.
+		row := reverseLookup[sortedOrder[retVal.Indices[i]]]
+		if row == -1 {
+			return nil, fmt.Errorf(
+				"%s: internal error computing reverse lookup - indices=%v reverseLookup=%v",
+				caller, retVal.Indices, reverseLookup,
+			)
+		}
+		retVal.OperationOnB[row*numIndices+i] = 1
+		retVal.OperationOnA[i*numIndices+row] = 1
+	}
+	return retVal, nil
 }
 
 // getGeneralRowOperation returns the non-swap row operation with matrix R that achieves the best
