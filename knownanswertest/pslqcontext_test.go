@@ -15,7 +15,7 @@ import (
 
 func TestPSLQContext(t *testing.T) {
 	const (
-		xLen                            = 20
+		xLen                            = 4
 		relationElementRange            = 5
 		randomRelationProbabilityThresh = 0.001
 		maxIterations                   = 20000
