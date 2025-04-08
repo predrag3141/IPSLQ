@@ -92,14 +92,7 @@ func TestBestDiagonalRowOp(t *testing.T) {
 	)
 }
 
-// intOpResults holds information needed in TestBestColumnOpInM for expected and actual results
-type intOpResults struct {
-	numIndices  int
-	intOp       *IntOperation
-	sortedNorms []float64
-}
-
-func TestBestColumnOpInM(t *testing.T) {
+func TestColumnSortingMethods(t *testing.T) {
 	const (
 		// A narrow range of possible diagonal elements to put in M makes column swaps less
 		// likely to place a short column on the right-hand side of M.
@@ -107,159 +100,242 @@ func TestBestColumnOpInM(t *testing.T) {
 		maxDiagonalElementSize = 100
 		numRows                = 17
 		numTests               = 100
-		expectedIndex          = 0
-		actualIndex            = 1
 		log2tolerance          = -50
 
-		// Edge cases to count
-		columnOpWasNil      = "column op was nil"
-		numIndicesDiffer    = "number of indices in column operations differ"
-		indicesDiffer       = "indices in column operations differ"
-		operationsOnBDiffer = "operations on B differ"
+		// Function being tested
+		sortDiagonalIndex      = 0
+		sortColumnsByNormIndex = 1
+		sortDiagonalLabel      = "sort-diagonal"
+		sortColumnsByNormLabel = "sort-columns-by-norm"
 	)
 
-	edgeCaseCounts := make(map[string]int)
+	tolerance := math.Pow(2, log2tolerance)
+	nilColumnOpCount := []int{0, 0}
+	dimensionCounts := []map[int]int{make(map[int]int), make(map[int]int)}
 	for testNbr := 0; testNbr < numTests; testNbr++ {
-		// Initializations
-		tolerance := math.Pow(2, log2tolerance)
-		results := []intOpResults{
-			{numIndices: 0, intOp: nil, sortedNorms: nil}, // expected
-			{numIndices: 0, intOp: nil, sortedNorms: nil}, // actual
-		}
-
 		// Get M and expected results
-		m, expected, err := createRandomM(
+		m, _, err := createRandomM(
 			numRows, minDiagonalElementSize, maxDiagonalElementSize, []int{}, "TestBestSwapInM",
 		)
+
+		// Parallel structs to hold actual results
+		actual := []struct {
+			intOp         *IntOperation
+			numIndices    int
+			mAsFloat64Sq  []float64
+			sortedColumns []int
+			skipTest      bool
+		}{
+			{
+				intOp:         nil,
+				numIndices:    0,
+				mAsFloat64Sq:  nil,
+				sortedColumns: make([]int, numRows),
+				skipTest:      false,
+			},
+			{
+				intOp:         nil,
+				numIndices:    0,
+				mAsFloat64Sq:  nil,
+				sortedColumns: make([]int, numRows),
+				skipTest:      false,
+			},
+		}
+
+		// Create separate instances of M as float64 for each sorting technique, since that
+		// can be modified in place. Also make an unchanging instance to be used for comparison.
+		var unchangingMAsFloat64 []float64
+		actual[sortDiagonalIndex].mAsFloat64Sq, err = m.AsFloat64()
 		require.NoError(t, err)
-		results[expectedIndex].intOp = expected.bestColumnOp
-		if results[expectedIndex].intOp != nil {
-			require.False(t, results[expectedIndex].intOp.isPermutation())
-			results[expectedIndex].numIndices = len(results[expectedIndex].intOp.Indices)
-		}
-
-		// Get actual results
-		var mAsFloat64 []float64
-		mAsFloat64, err = m.AsFloat64()
+		actual[sortColumnsByNormIndex].mAsFloat64Sq, err = m.AsFloat64()
 		require.NoError(t, err)
-		results[actualIndex].intOp, err = permutationOfM(mAsFloat64, m.NumRows(), "TestBestSwapInM")
+		unchangingMAsFloat64, err = m.AsFloat64()
+
+		// Create column operations using the sort-diagonal technique
+		// Square entries of M in-place
+		for i := 0; i < numRows*numRows; i++ {
+			entry := actual[sortDiagonalIndex].mAsFloat64Sq[i]
+			actual[sortDiagonalIndex].mAsFloat64Sq[i] = entry * entry
+		}
+		actual[sortDiagonalIndex].intOp, err = sortDiagonal(
+			actual[sortDiagonalIndex].mAsFloat64Sq, numRows, "TestBestColumnOpInM",
+		)
 		require.NoError(t, err)
-		if results[actualIndex].intOp != nil {
-			require.False(t, results[actualIndex].intOp.isPermutation())
-			results[actualIndex].numIndices = len(results[actualIndex].intOp.Indices)
+		if actual[sortDiagonalIndex].intOp == nil {
+			nilColumnOpCount[sortDiagonalIndex]++
+			actual[sortDiagonalIndex].skipTest = true
 		}
 
-		// Compute column norms
-		columnNorms := make([]float64, numRows)
-		for j := 0; j < numRows; j++ {
-			for i := 0; i < numRows; i++ {
-				columnNorms[j] += mAsFloat64[i*numRows+j] * mAsFloat64[i*numRows+j]
+		// Create column operations using the sort-columns-by-norm technique
+		for i := 0; i < numRows*numRows; i++ {
+			entry := actual[sortColumnsByNormIndex].mAsFloat64Sq[i]
+			actual[sortColumnsByNormIndex].mAsFloat64Sq[i] = entry * entry
+		}
+		actual[sortColumnsByNormIndex].intOp, err = sortColumnsByNorm(
+			actual[sortColumnsByNormIndex].mAsFloat64Sq, numRows, "TestBestColumnOpInM",
+		)
+		require.NoError(t, err)
+		if actual[sortColumnsByNormIndex].intOp == nil {
+			nilColumnOpCount[sortColumnsByNormIndex]++
+			actual[sortColumnsByNormIndex].skipTest = true
+		}
+
+		// Set numIndices and increment the count of this sub-matrix dimension
+		for _, k := range []int{sortDiagonalIndex, sortColumnsByNormIndex} {
+			if !actual[k].skipTest {
+				actual[k].numIndices = len(actual[k].intOp.Indices)
+				dimensionCounts[k][actual[k].numIndices]++
 			}
 		}
 
-		// Handle nil column operations
-		if (results[expectedIndex].intOp == nil) || (results[actualIndex].intOp == nil) {
-			edgeCaseCounts[columnOpWasNil]++
-			require.Nil(t, results[expectedIndex].intOp)
-			require.Nil(t, results[actualIndex].intOp)
-
-			// If the column operations are nil, the column norms should be sorted
-			for j := 1; j < numRows; j++ {
-				require.LessOrEqual(
-					t, columnNorms[j], columnNorms[j-1]+tolerance,
-					"columnNorms[%d] = %f > %f = columnNorms[%d]",
-					j, columnNorms[j], columnNorms[j-1], j-1,
-				)
+		// Verify that operations on A and B are inverses
+		// The operations on B and A should be inverses of each other
+		var areInverses bool
+		for _, k := range []int{sortDiagonalIndex, sortColumnsByNormIndex} {
+			if actual[k].skipTest {
+				continue
 			}
-			continue
-		}
-
-		// Check that the expected and actual integer operations sort the column norms.
-		for _, k := range []int{expectedIndex, actualIndex} {
-			// Initializations
-			expectedOrActual := "expected"
-			if k == actualIndex {
-				expectedOrActual = "actual"
-			}
-
-			// Create results[k].sortedNorms
-			results[k].sortedNorms = make([]float64, numRows)
-			for j := 0; j < numRows; j++ {
-				// If j is a fixed point of the permutation, results[k].sortedNorms[j]
-				// will remain untouched by the next block.
-				results[k].sortedNorms[j] = columnNorms[j]
-			}
-			for j := 0; j < results[k].numIndices; j++ {
-				for i := 0; i < results[k].numIndices; i++ {
-					if results[k].intOp.OperationOnB[i*results[k].numIndices+j] == 1 {
-						// Column results[k].intOp.Indices[i] is copied to column
-						// results[k].intOp.Indices[j].
-						src := results[k].intOp.Indices[i]
-						dest := results[k].intOp.Indices[j]
-						results[k].sortedNorms[dest] = columnNorms[src]
-					}
-				}
-			}
-
-			// Check that results[k].sortedNorms is sorted
-			for j := 1; j < numRows; j++ {
-				require.LessOrEqual(
-					t, results[k].sortedNorms[j], results[k].sortedNorms[j-1]+tolerance,
-					"results[%s].sortedNorms[%d] = %f > %f = results[%s].sortedNorms[%d]",
-					expectedOrActual, j, results[k].sortedNorms[j],
-					results[k].sortedNorms[j-1], expectedOrActual, j-1,
-				)
-			}
-
-			// The operations on B and A should be inverses of each other
-			var areInverses bool
-			operationOnB := util.CopyIntToInt64(results[k].intOp.OperationOnB)
-			operationOnA := util.CopyIntToInt64(results[k].intOp.OperationOnA)
-			areInverses, err = util.IsInversePair(operationOnB, operationOnA, results[k].numIndices)
+			operationOnB := util.CopyIntToInt64(actual[k].intOp.OperationOnB)
+			operationOnA := util.CopyIntToInt64(actual[k].intOp.OperationOnA)
+			areInverses, err = util.IsInversePair(operationOnB, operationOnA, actual[k].numIndices)
 			require.NoError(t, err)
+			sortingMethod := "diagonal"
+			if k == sortColumnsByNormIndex {
+				sortingMethod = "norm index"
+			}
 			require.True(
-				t, areInverses, "%s operationOnB = %v %s operationOnA = %v",
-				expectedOrActual, operationOnB, expectedOrActual, operationOnA,
+				t, areInverses, "sorting method: %s\nintOp:%#v\nm:\n%v\n",
+				sortingMethod, actual[k].intOp, m,
 			)
 		}
 
-		// In most cases, the expected and actual integer operations are actually equal.
-		// But it is not a bug for them to be different, provided that they both sort the
-		// column norms. Count these edge cases.
-		columnOpsDiffer := false
-		var numIndices int
-		if results[expectedIndex].numIndices != results[actualIndex].numIndices {
-			columnOpsDiffer = true
-		}
-		if columnOpsDiffer {
-			edgeCaseCounts[numIndicesDiffer]++
-		} else {
-			numIndices = results[expectedIndex].numIndices
-			for i := 0; i < numIndices; i++ {
-				if results[expectedIndex].intOp.Indices[i] != results[actualIndex].intOp.Indices[i] {
-					columnOpsDiffer = true
-					break
-				}
+		// Initialize numIndices and sortedColumns
+		for _, k := range []int{sortDiagonalIndex, sortColumnsByNormIndex} {
+			if actual[k].skipTest {
+				continue
 			}
-		}
-		if columnOpsDiffer {
-			edgeCaseCounts[indicesDiffer]++
-		} else {
-			for i := 0; i < numIndices*numIndices; i++ {
-				if results[expectedIndex].intOp.OperationOnB[i] != results[actualIndex].intOp.OperationOnB[i] {
-					columnOpsDiffer = true
-					break
-				}
+			actual[k].numIndices = len(actual[k].intOp.Indices)
+			for j := 0; j < numRows; j++ {
+				actual[k].sortedColumns[j] = j
 			}
-		}
-		if columnOpsDiffer {
-			edgeCaseCounts[operationsOnBDiffer]++
 		}
 
+		// Calculate the column permutations from the intOp fields, and verify that they
+		// are permutation matrices.
+		for _, k := range []int{sortDiagonalIndex, sortColumnsByNormIndex} {
+			if actual[k].skipTest {
+				continue
+			}
+
+			// Compute the column permutation
+			newSortedColumns := make([]int, numRows)
+			for j := 0; j < numRows; j++ {
+				newSortedColumns[j] = j
+			}
+			for j := 0; j < actual[k].numIndices; j++ {
+				for i := 0; i < actual[k].numIndices; i++ {
+					if actual[k].intOp.OperationOnB[i*actual[k].numIndices+j] == 1 {
+						// During multiplication on the right by permutation matrix
+						// actual[k].intOp.OperationOnB, column results[k].intOp.Indices[i]
+						// (the source index), is copied to column results[k].intOp.Indices[j]
+						// (the destination index).
+						srcColumn := actual[k].intOp.Indices[i]
+						destColumn := actual[k].intOp.Indices[j]
+						newSortedColumns[destColumn] = actual[k].sortedColumns[srcColumn]
+					}
+				}
+			}
+			for j := 0; j < numRows; j++ {
+				actual[k].sortedColumns[j] = newSortedColumns[j]
+			}
+
+			// Verify that sortedColumns is a permutation
+			counts := make([]int, numRows)
+			for j := 0; j < numRows; j++ {
+				counts[actual[k].sortedColumns[j]]++
+			}
+			for j := 0; j < numRows; j++ {
+				require.Equal(
+					t, 1, counts[actual[k].sortedColumns[j]],
+					"k: %d, OperationOnB: %v, sortedColumns: %v",
+					k, actual[k].intOp.OperationOnB, actual[k].sortedColumns,
+				)
+			}
+		}
+
+		// In the permutation that sorts diagonal elements,
+		// - All swaps come in pairs
+		// - Partial norms decrease: For each pair (j0, j1) swapped with j0 < j1, the norm of
+		//   the entries in rows j0 through j1 is less for column j0 than for column j1
+		if !actual[sortDiagonalIndex].skipTest {
+			for destColumn := 0; destColumn < numRows; destColumn++ {
+				srcColumn := actual[sortDiagonalIndex].sortedColumns[destColumn]
+				require.Equal( // all swaps come in pairs
+					t, destColumn, actual[sortDiagonalIndex].sortedColumns[srcColumn],
+					"destColumn: %d\nsrcColumn:%d\nsortedColumns:%v\nintOp:%#v\nm:\n%v\n",
+					destColumn, srcColumn, actual[sortDiagonalIndex].sortedColumns,
+					actual[sortColumnsByNormIndex].intOp, m,
+				)
+				if srcColumn == destColumn {
+					// There is nothing to check for columns that remain fixed under the permutation
+					continue
+				}
+
+				var leftNorm, rightNorm float64
+				leftColumn, rightColumn := srcColumn, destColumn
+				if destColumn < srcColumn {
+					leftColumn = destColumn
+					rightColumn = srcColumn
+				}
+				for i := leftColumn; i <= rightColumn; i++ {
+					entry := unchangingMAsFloat64[i*numRows+leftColumn]
+					leftNorm += entry * entry
+					entry = unchangingMAsFloat64[i*numRows+rightColumn]
+					rightNorm += entry * entry
+				}
+				require.True( // partial norms decrease
+					t, leftNorm < rightNorm+tolerance,
+					"columns: [%d,%d]\nnorms: [%f,%f]\nsortedColumns:%v\nintOp:%#v\nm:\n%v\n",
+					leftColumn, rightColumn, leftNorm, rightNorm,
+					actual[sortDiagonalIndex].sortedColumns, actual[sortDiagonalIndex].intOp, m,
+				)
+			}
+		}
+
+		// In the permutation that sorts columns by norm, the norms decrease or remain
+		// the same from left to right.
+		if !actual[sortColumnsByNormIndex].skipTest {
+			lastNorm := math.MaxFloat64
+			for j := 0; j < numRows; j++ {
+				var norm float64
+				for i := 0; i < numRows; i++ {
+					srcColumn := actual[sortColumnsByNormIndex].sortedColumns[j]
+					entry := unchangingMAsFloat64[i*numRows+srcColumn]
+					norm += entry * entry
+				}
+				require.True(
+					t, norm <= lastNorm+tolerance,
+					"column: %d\nnorms: [%f,%f]\nsortedColumns:%v\nintOp:%#v\nm:\n%v\n",
+					j, lastNorm, norm, actual[sortColumnsByNormIndex].sortedColumns,
+					actual[sortColumnsByNormIndex].intOp, m,
+				)
+			}
+		}
 	}
 	t.Logf(
-		"Edge cases: %s\n",
-		strings.Replace(fmt.Sprintf("%v", edgeCaseCounts), "map", "", 1),
+		"Tests: %d\n"+
+			"Nil IntOperations for [%s %s]: [%d %d]\n"+
+			"Sub-matrix dimensions for %s: %s\n"+
+			"Sub-matrix dimensions for %s: %s\n",
+		numTests,
+		sortDiagonalLabel, sortColumnsByNormLabel,
+		nilColumnOpCount[sortDiagonalIndex], nilColumnOpCount[sortColumnsByNormIndex],
+		sortDiagonalLabel, strings.Replace(fmt.Sprintf(
+			"%v", dimensionCounts[sortDiagonalIndex]), "map", "", 1,
+		),
+		sortColumnsByNormLabel, strings.Replace(fmt.Sprintf(
+			"%v", dimensionCounts[sortColumnsByNormIndex]), "map", "", 1,
+		),
 	)
 }
 

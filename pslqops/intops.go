@@ -53,19 +53,29 @@ type IntOperation struct {
 func NextIntOp(hOrM *bigmatrix.BigMatrix) (*IntOperation, float64, error) {
 	if hOrM.NumRows() == hOrM.NumCols() {
 		// hOrM is M
+		numRows := hOrM.NumRows()
 		var retVal *IntOperation
-		mAsFloat64, err := hOrM.AsFloat64()
+
+		// Populate mAsFloat64Sq with squared entries, and compute the Frobenius norm of M
+		mAsFloat64Sq, err := hOrM.AsFloat64()
 		if err != nil {
 			return nil, 0, fmt.Errorf("NextIntOp: could not convert M to float64: %q", err)
 		}
-		retVal, err = permutationOfM(mAsFloat64, hOrM.NumRows(), "NextIntOp")
 		var frobeniusNorm float64
-		for i := 0; i < hOrM.NumRows(); i++ {
-			rowStart := i * hOrM.NumRows()
+		for i := 0; i < numRows; i++ {
+			rowStart := i * numRows
 			for j := 0; j <= i; j++ {
-				entry := mAsFloat64[rowStart+j]
-				frobeniusNorm += entry * entry
+				entry := mAsFloat64Sq[rowStart+j]
+				entrySq := entry * entry
+				mAsFloat64Sq[rowStart+j] = entrySq
+				frobeniusNorm += entrySq
 			}
+		}
+
+		// Compute the integer operation that best sorts the diagonal elements
+		retVal, err = sortDiagonal(mAsFloat64Sq, hOrM.NumRows(), "NextIntOp")
+		if err != nil {
+			return nil, 0, fmt.Errorf("NextIntOp: could not sort columns by norm: %q", err)
 		}
 		return retVal, frobeniusNorm, nil
 	}
@@ -237,38 +247,109 @@ func bestDiagonalRowOpInH(h *bigmatrix.BigMatrix, caller string) (*IntOperation,
 	return bestRowOp, nil
 }
 
-// permutationOfM returns a column operation that sorts the columns of M
+// sortColumnsByNorm returns a column operation that sorts the columns of M
 // by their Euclidean lengths. If this turns out to be the identity, a nil
 // column operation is returned.
-func permutationOfM(mAsFloat64 []float64, numRows int, caller string) (*IntOperation, error) {
+func sortDiagonal(mAsFloat64Sq []float64, numRows int, caller string) (*IntOperation, error) {
+	// Set caller and test dimensions
+	caller = fmt.Sprintf("%s-sortDiagonal", caller)
+	mLen := len(mAsFloat64Sq)
+	if mLen != numRows*numRows {
+		return nil, fmt.Errorf(
+			"%s: len(mAsFloat64Sq) = %d != %d = numRows^2", caller, mLen, numRows*numRows,
+		)
+	}
+
+	// Get the new column order: Starting from the right-hand side, minimize diagonal
+	// elements.
+	columnsAreMoved := false
+	columnNormSq := make([]float64, numRows)
+	columnOrder := make([]int, numRows)
+	for j := 0; j < numRows; j++ {
+		columnOrder[j] = j
+		for i := j; i < numRows; i++ {
+			columnNormSq[j] += mAsFloat64Sq[i*numRows+j]
+		}
+	}
+	for j1 := numRows - 1; 0 < j1; j1-- {
+		// Skip any columns that are already swapped
+		if columnOrder[j1] != j1 {
+			// Column j1 has already been swapped with another column, so it will be skipped. But
+			// the contribution of row j1 to column norms has to be removed before re-entering
+			// the j1-loop.
+			for j := 0; j <= j1; j++ {
+				columnNormSq[j] -= mAsFloat64Sq[j1*numRows+j]
+			}
+			continue
+		}
+		bestNorm := math.MaxFloat64
+		bestJ0 := -1
+		for j0 := 0; j0 < j1; j0++ {
+			if columnOrder[j0] != j0 {
+				// Column j0 has been swapped with another column
+				continue
+			}
+			if columnNormSq[j0] < bestNorm {
+				bestNorm = columnNormSq[j0]
+				bestJ0 = j0
+			}
+		}
+		if bestNorm < columnNormSq[j1] {
+			columnOrder[bestJ0] = j1
+			columnOrder[j1] = bestJ0
+			columnsAreMoved = true
+		}
+
+		// The contribution of row j1 to column norms has to be removed before
+		// re-entering the loop.
+		for j := 0; j <= j1; j++ {
+			columnNormSq[j] -= mAsFloat64Sq[j1*numRows+j]
+		}
+	}
+	if columnsAreMoved {
+		return columnOrderToIntOp(columnOrder, numRows, caller)
+	}
+
+	// No columns were moved when sorting diagonal elements
+	return nil, nil
+}
+
+// sortColumnsByNorm returns a column operation that sorts the columns of M
+// by their Euclidean lengths. If this turns out to be the identity, a nil
+// column operation is returned.
+func sortColumnsByNorm(mAsFloat64Sq []float64, numRows int, caller string) (*IntOperation, error) {
 	// Initialize mSq, a float64 copy of M but with entries squared
-	caller = fmt.Sprintf("%s-bestSwapInM", caller)
+	caller = fmt.Sprintf("%s-sortColumnsByNorm", caller)
 	columnNorms := make([]float64, numRows)
 	for i := 0; i < numRows; i++ {
 		for j := 0; j <= i; j++ {
-			entry := mAsFloat64[i*numRows+j]
-			columnNorms[j] += entry * entry
+			columnNorms[j] += mAsFloat64Sq[i*numRows+j]
 		}
 	}
 
-	// Create a slice of sortedOrder
-	sortedOrder := make([]int, numRows)
-	for i := range sortedOrder {
-		sortedOrder[i] = i
+	// Create a slice of columnOrder
+	columnOrder := make([]int, numRows)
+	for i := range columnOrder {
+		columnOrder[i] = i
 	}
 
-	// Sort the sortedOrder so that sortedOrder[i] is the index of the ith-longest column
+	// Sort the columnOrder so that columnOrder[i] is the index of the ith-longest column
 	// of M. The anonymous "less" function tells sort.Slice to rank longer columns
 	// lower than shorter columns.
-	sort.Slice(sortedOrder, func(i, j int) bool {
-		return columnNorms[sortedOrder[i]] > columnNorms[sortedOrder[j]]
+	sort.Slice(columnOrder, func(i, j int) bool {
+		return columnNorms[columnOrder[i]] > columnNorms[columnOrder[j]]
 	})
+	return columnOrderToIntOp(columnOrder, numRows, caller)
+}
+
+func columnOrderToIntOp(columnOrder []int, numRows int, caller string) (*IntOperation, error) {
+	caller = fmt.Sprintf("%s-columnOrderToIntOp", caller)
 
 	// Count the number of non-fixed-points in the permutation, which determines
 	// the size of the Indices array and the permutation matrices.
 	numIndices := 0
 	for i := 0; i < numRows; i++ {
-		if sortedOrder[i] != i {
+		if columnOrder[i] != i {
 			numIndices++
 		}
 	}
@@ -287,7 +368,7 @@ func permutationOfM(mAsFloat64 []float64, numRows int, caller string) (*IntOpera
 
 	// Set the Indices array
 	for i, cursor := 0, 0; i < numRows; i++ {
-		if i != sortedOrder[i] {
+		if i != columnOrder[i] {
 			retVal.Indices[cursor] = i
 			cursor++
 		}
@@ -305,15 +386,15 @@ func permutationOfM(mAsFloat64 []float64, numRows int, caller string) (*IntOpera
 	// Populate the operations on M and B and on H and A
 	for i := 0; i < numIndices; i++ {
 		// in the expansion of retVal.OperationOnB  to a numRows by numRows matrix, the
-		// column retVal.Indices[i] moves column sortedOrder[retVal.Indices[i]] to column
-		// retVal.Indices[i]. This means putting a 1 in row sortedOrder[retVal.Indices[i]].
+		// column retVal.Indices[i] moves column columnOrder[retVal.Indices[i]] to column
+		// retVal.Indices[i]. This means putting a 1 in row columnOrder[retVal.Indices[i]].
 		//
 		// Translated to the indexing of retVal.Indices, the 1 in column i appears
-		// in row reverseLookup[sortedOrder[retVal.Indices[i]]].
+		// in row reverseLookup[columnOrder[retVal.Indices[i]]].
 		//
 		// Since retVal.OperationOnB is an orthogonal matrix, its inverse is its transpose.
 		// Therefore, the role of row and column are reversed in retVal.OperationOnA.
-		row := reverseLookup[sortedOrder[retVal.Indices[i]]]
+		row := reverseLookup[columnOrder[retVal.Indices[i]]]
 		if row == -1 {
 			return nil, fmt.Errorf(
 				"%s: internal error computing reverse lookup - indices=%v reverseLookup=%v",

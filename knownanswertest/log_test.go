@@ -14,7 +14,7 @@ import (
 
 func TestNewKATLog(t *testing.T) {
 	const (
-		xLen                            = 55
+		xLen                            = 70
 		relationElementRange            = 5
 		randomRelationProbabilityThresh = 0.001
 		maxIterations                   = 20000
