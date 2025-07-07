@@ -616,8 +616,8 @@ func TestBigNumber_RoundTowardsZero(t *testing.T) {
 		// Test exact integers
 		inputValue = NewFromInt64(i)
 		expected = NewFromInt64(i)
-		actual = inputValue.RoundTowardsZero()
 		_, inputValueAsStr = inputValue.String()
+		actual = inputValue.RoundTowardsZero()
 		assert.NotNilf(t, actual, "i: %d, inputValue: %q", i, inputValueAsStr)
 		assert.Equalf(t, 0, expected.Cmp(actual), "i: %d, inputValue: %q", i, inputValueAsStr)
 
@@ -630,8 +630,8 @@ func TestBigNumber_RoundTowardsZero(t *testing.T) {
 			} else {
 				expected = NewFromInt64(i)
 			}
-			actual = inputValue.RoundTowardsZero()
 			_, inputValueAsStr = inputValue.String()
+			actual = inputValue.RoundTowardsZero()
 			assert.NotNilf(t, actual, "i: %d, j: %d, inputValue: %q", i, j, inputValueAsStr)
 			assert.Equalf(t, 0, expected.Cmp(actual), "i: %d, j: %d, inputValue: %q", i, j, inputValueAsStr)
 
@@ -642,8 +642,8 @@ func TestBigNumber_RoundTowardsZero(t *testing.T) {
 			} else {
 				expected = NewFromInt64(i - 1)
 			}
-			actual = inputValue.RoundTowardsZero()
 			_, inputValueAsStr = inputValue.String()
+			actual = inputValue.RoundTowardsZero()
 			assert.NotNilf(t, actual, "i: %d, j: %d, inputValue: %q", i, j, inputValueAsStr)
 			assert.Equalf(t, 0, expected.Cmp(actual), "i: %d, j: %d, inputValue: %q", i, j, inputValueAsStr)
 		}

@@ -96,6 +96,9 @@ type PSLQContext struct {
 	IterationsBeforeInverting       int      `json:"iterations_before_inverting"`
 	IterationsAfterInverting        int      `json:"iterations_after_inverting"`
 	IterationsBeforeFindingRelation int      `json:"iterations_before_finding_relation"`
+	ColumnsBounded                  int      `json:"columns_bounded"`
+	ColumnsReduced                  int      `json:"columns_reduced"`
+	ColumnsProcessed                int      `json:"columns_processed"`
 	TotalIterations                 int      `json:"total_iterations"`
 	ReductionsBeforeInverting       int      `json:"reductions_before_inverting"`
 	ReductionsAfterInverting        int      `json:"reductions_after_inverting"`
@@ -131,6 +134,9 @@ func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThr
 		MaxXBasedOnCubeVolume:           maxXBasedOnCubeVolume,
 		MaxXBasedOnSphereVolume:         maxXBasedOnSphereVolume,
 		FoundRelation:                   false,
+		ColumnsBounded:                  0,
+		ColumnsReduced:                  0,
+		ColumnsProcessed:                0,
 		IterationsBeforeFindingRelation: 0,
 		IterationsAfterInverting:        0,
 		IterationsBeforeInverting:       0,
@@ -144,11 +150,16 @@ func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThr
 // finding pc.Relation is always done.
 func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 	// Set flags and counts unrelated to solutions
+
+	cc := state.GetColumnCounts()
 	pc.IterationsBeforeInverting, pc.IterationsAfterInverting = state.IterationCounts()
 	pc.ReductionsBeforeInverting, pc.ReductionsAfterInverting = state.ReductionCounts()
+	pc.ColumnsBounded, pc.ColumnsReduced, pc.ColumnsProcessed = cc.Bounded, cc.Reduced, cc.Processed
 	pc.TotalIterations = pc.IterationsBeforeInverting + pc.IterationsAfterInverting
 
 	// Check solutions to see if any matches pc.Relation
+	pc.BestSolutionNorm = math.MaxFloat64
+	pc.WorstSolutionNorm = -1.0
 	if setSolutions {
 		// This call to UpdateSolutions overwrites any previous solutions
 		pc.Solutions = []string{}
@@ -178,10 +189,6 @@ func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 
 		// Update the best and worst solution norms
 		norm := solutionNorm(putativeSolution)
-		if len(pc.Solutions) == 0 {
-			pc.BestSolutionNorm = norm
-			pc.WorstSolutionNorm = norm
-		}
 		if pc.BestSolutionNorm > norm {
 			pc.BestSolutionNorm = norm
 		}
@@ -190,7 +197,7 @@ func (pc *PSLQContext) Update(state *pslqops.State, setSolutions bool) error {
 		}
 	}
 	pc.SolutionCount = len(pc.Solutions)
-	if (pc.BestSolutionNorm > 0) && (pc.SolutionCount > 0) {
+	if (pc.BestSolutionNorm > 0) && (pc.WorstSolutionNorm > 0) {
 		pc.WorstOverBestSolutionNorm = pc.WorstSolutionNorm / pc.BestSolutionNorm
 		pc.BestSolutionOverRelationNorm = pc.BestSolutionNorm / pc.RelationNorm
 	}

@@ -5,6 +5,7 @@ package knownanswertest
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,13 @@ const (
 	iterationsBeforeInvertingHeader = "iterations before inverting"
 	iterationsAfterInvertingHeader  = "iterations after inverting"
 	totalIterationsHeader           = "total iterations"
+	columnsBoundedHeader            = "columns bounded"
+	columnsReducedHeader            = "columns reduced"
+	columnsProcessedHeader          = "columns processed"
+	columnsBoundedRatioHeader       = "columns bounded/reduced"
+	columnsProcessedRatioHeader     = "columns reduced/processed"
+	bestSolutionNormHeader          = "best solution norm"
+	worstSolutionNormHeader         = "worst solution norm"
 	foundRelationHeader             = "found relation"
 )
 
@@ -79,13 +87,17 @@ func NewKATLog(
 	return retVal, nil
 }
 
-func (kl *KATLog) ReportProgress(pc *PSLQContext) error {
+func (kl *KATLog) ReportProgress(pc *PSLQContext, printHeader bool) error {
 	// Write the header
-	if pc.TotalIterations == 0 {
+	if printHeader {
 		_, err := kl.progressFile.WriteString(fmt.Sprintf(
-			"%s,%s,%s,%s,%s\n",
-			timeSinceStartHeader, iterationsBeforeInvertingHeader, iterationsAfterInvertingHeader,
-			totalIterationsHeader, foundRelationHeader,
+			"%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+			timeSinceStartHeader,
+			iterationsBeforeInvertingHeader, iterationsAfterInvertingHeader, totalIterationsHeader,
+			columnsBoundedHeader, columnsReducedHeader, columnsProcessedHeader,
+			columnsBoundedRatioHeader, columnsProcessedRatioHeader,
+			bestSolutionNormHeader, worstSolutionNormHeader,
+			foundRelationHeader,
 		))
 		if err != nil {
 			return fmt.Errorf(
@@ -93,7 +105,7 @@ func (kl *KATLog) ReportProgress(pc *PSLQContext) error {
 				kl.progressFilePath, err.Error(),
 			)
 		}
-		return nil // Skip the report at iteration 0, other than writing the header
+		return nil // Skip the first report, other than writing the header
 	}
 
 	// Determine whether to report progress
@@ -112,9 +124,41 @@ func (kl *KATLog) ReportProgress(pc *PSLQContext) error {
 	}
 
 	// Report progress
-	_, err := kl.progressFile.WriteString(fmt.Sprintf("%v,%d,%d,%d,%v\n",
-		time.Since(kl.startTime), pc.IterationsBeforeInverting, pc.IterationsAfterInverting,
-		pc.TotalIterations, pc.FoundRelation,
+	columnRatiosAsStr, normsAsStr := "-,-", "-,-"
+	if pc.ColumnsProcessed > 0 {
+		if pc.ColumnsReduced > 0 {
+			columnRatiosAsStr = fmt.Sprintf(
+				"%f,%f",
+				float64(pc.ColumnsReduced)/float64(pc.ColumnsProcessed),
+				float64(pc.ColumnsBounded)/float64(pc.ColumnsReduced),
+			)
+		} else {
+			columnRatiosAsStr = fmt.Sprintf(
+				"%f,-", float64(pc.ColumnsReduced)/float64(pc.ColumnsProcessed),
+			)
+		}
+	}
+	if (0.0 < pc.BestSolutionNorm) && (pc.BestSolutionNorm < math.MaxFloat64) {
+		if (0.0 < pc.WorstSolutionNorm) && (pc.WorstSolutionNorm < math.MaxFloat64) {
+			normsAsStr = fmt.Sprintf("%f,%f", pc.BestSolutionNorm, pc.WorstSolutionNorm)
+		} else {
+			normsAsStr = fmt.Sprintf("%f,-", pc.BestSolutionNorm)
+		}
+	} else if (0.0 < pc.WorstSolutionNorm) && (pc.WorstSolutionNorm < math.MaxFloat64) {
+		normsAsStr = fmt.Sprintf("-,%f", pc.WorstSolutionNorm)
+	}
+	_, err := kl.progressFile.WriteString(fmt.Sprintf(
+		"%v,"+ // Time since start
+			"%d,%d,%d,"+ // Iteration counts
+			"%d,%d,%d,"+ // Column counts
+			"%s,%s,"+ // Column count ratios, followed by best and worst solution norms
+			"%v\n", //  found relation
+		time.Since(kl.startTime),
+		pc.IterationsBeforeInverting, pc.IterationsAfterInverting, pc.TotalIterations,
+		pc.ColumnsBounded, pc.ColumnsReduced, pc.ColumnsProcessed,
+		columnRatiosAsStr,
+		normsAsStr,
+		pc.FoundRelation,
 	))
 	if err != nil {
 		return fmt.Errorf(

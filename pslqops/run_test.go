@@ -34,14 +34,14 @@ func TestNew(t *testing.T) {
 	rawStrs00 := []string{"245.43", "3452.98", "-943.54", "-89.876234"}
 	expected00, err := newExpectedState(rawStrs00, "TestNew")
 	require.NoError(t, err)
-	actual00, err := NewState(rawStrs00)
+	actual00, err := NewState(rawStrs00, 2)
 	expected00.testEquality(t, actual00)
 
 	var actual01 *State
 	rawStrs01 := []string{"761.98", "2.8952", "-61.941", "-900.03", "241.3", "-53.473", "73.832", "-51.347", "91.827", "-1.5017"}
 	expected01, err := newExpectedState(rawStrs01, "TestNew")
 	require.NoError(t, err)
-	actual01, err = NewState(rawStrs01)
+	actual01, err = NewState(rawStrs01, 2)
 	require.NoError(t, err)
 	expected01.testEquality(t, actual01)
 }
@@ -61,7 +61,7 @@ func TestState_OneIteration(t *testing.T) {
 		for j := 0; j < numRows; j++ {
 			input[j] = getRandomDecimalStr(t, digitsPerEntry)
 		}
-		state, err := NewState(input)
+		state, err := NewState(input, 2)
 		var roundOffErrorAsString string
 		numIterations := 0 // needed outside the loop below
 		for ; numIterations < maxIterations; numIterations++ {

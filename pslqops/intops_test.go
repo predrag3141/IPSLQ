@@ -87,7 +87,7 @@ func TestBestDiagonalRowOp(t *testing.T) {
 		strings.Replace(fmt.Sprintf("%v", maxRowSwapCount), `map`, "", 1),
 	)
 	t.Logf(
-		"Count of tests where results were close enough but not exact: %d\n",
+		"Count of columnsTested where results were close enough but not exact: %d\n",
 		closeEnoughButNotExactCount,
 	)
 }

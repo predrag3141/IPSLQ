@@ -20,6 +20,7 @@ func TestPSLQContext(t *testing.T) {
 		randomRelationProbabilityThresh = 0.001
 		maxIterations                   = 20000
 		bigNumberPrecision              = 1500
+		log2EColumnsTested              = 8
 	)
 
 	// Initializations
@@ -28,7 +29,7 @@ func TestPSLQContext(t *testing.T) {
 	pslqContext := NewPSLQContext(xLen, relationElementRange, randomRelationProbabilityThresh)
 	require.NotNil(t, pslqContext.InputAsDecimalString)
 	require.NotNil(t, pslqContext.InputAsBigInt)
-	pslqState, err = pslqops.NewState(pslqContext.InputAsDecimalString)
+	pslqState, err = pslqops.NewState(pslqContext.InputAsDecimalString, log2EColumnsTested)
 	require.NoError(t, err)
 
 	// Run PSLQ

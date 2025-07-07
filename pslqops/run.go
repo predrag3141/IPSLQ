@@ -35,12 +35,15 @@ type State struct {
 	e                     *bigmatrix.BigMatrix
 	numRows               int // number of rows in H
 	numCols               int // number of columns in H, and the dimension of M
+	log2EColumnsTested    int
 	observedRoundOffError *bignumber.BigNumber
 	roundOffCurrentWeight *bignumber.BigNumber
 	roundOffHistoryWeight *bignumber.BigNumber
 	solutionCount         int
 	hReductionCount       int // How many times H was row reduced by D
 	mReductionCount       int // How many times M was column reduced by E
+	columnsReduced        int // Column reductions performed
+	columnsBounded        int // Column reductions resulting in all elements bounded by the diagonal
 	mConsecutiveUnreduced int // Number of times in a row that m was not reduced by E
 	hIterationCount       int // How many times H was iterated on, with or without reduction
 	mIterationCount       int // How many times M was iterated on, with or without reduction
@@ -49,7 +52,7 @@ type State struct {
 }
 
 // NewState returns a new State from a provided decimal string array
-func NewState(input []string) (*State, error) {
+func NewState(input []string, log2EColumnsTested int) (*State, error) {
 	// var rawX *bigmatrix.BigMatrix = GetRawX(input)
 	rawX, err := getRawX(input, "NewState")
 	if err != nil {
@@ -65,8 +68,11 @@ func NewState(input []string) (*State, error) {
 		b:                     bigmatrix.NewEmpty(nr, nr),
 		d:                     bigmatrix.NewEmpty(nr, nr),
 		e:                     bigmatrix.NewEmpty(nr, nr),
+		columnsReduced:        0,
+		columnsBounded:        0,
 		numRows:               nr,
 		numCols:               nr - 1,
+		log2EColumnsTested:    log2EColumnsTested,
 		observedRoundOffError: bignumber.NewFromInt64(0),
 		roundOffCurrentWeight: nil,
 		solutionCount:         0,
@@ -253,8 +259,32 @@ func (s *State) ReductionCounts() (int, int) {
 	return s.hReductionCount, s.mReductionCount
 }
 
+// GetAllZeroRowsCalculated returns the number of all-zero rows (except diagonal entries)
+// calculated in D that should ideally have been identified as already reduced, and skipped
 func (s *State) GetAllZeroRowsCalculated() int64 {
 	return s.allZeroRowsCalculated
+}
+
+type ColumnCounts struct {
+	Processed int // columns processed for potential reduction
+	Reduced   int // columns reduced in L2 norm
+	Bounded   int // columns reduced and bounded by half diagonal elements to their right
+}
+
+// GetColumnCounts returns the total number of
+func (s *State) GetColumnCounts() *ColumnCounts {
+	if s.m == nil {
+		return &ColumnCounts{
+			Processed: 0, // No columns were processed since s.m == nil
+			Reduced:   s.columnsReduced,
+			Bounded:   s.columnsBounded,
+		}
+	}
+	return &ColumnCounts{
+		Processed: s.mIterationCount*s.m.NumRows() - 1,
+		Reduced:   s.columnsReduced,
+		Bounded:   s.columnsBounded,
+	}
 }
 
 func (s *State) GetObservedRoundOffError() *bignumber.BigNumber {
@@ -540,10 +570,13 @@ func (s *State) step1(caller string) error {
 			return fmt.Errorf("%s: could not invert D: %q", caller, err.Error())
 		}
 	} else {
-		isIdentity, calculatedAllZeroRow, err = getE(s.m, s.e, caller)
+		var columnsReduced, columnsBounded int
+		columnsReduced, columnsBounded, err = getE(s.m, s.e, s.log2EColumnsTested, caller)
 		if err != nil {
 			return err
 		}
+		s.columnsReduced += columnsReduced
+		s.columnsBounded += columnsBounded
 		if isIdentity {
 			s.mConsecutiveUnreduced++
 		} else {

@@ -102,104 +102,6 @@ func TestGetD(t *testing.T) {
 	fmt.Printf("Number of all zero rows calculated: %d / %d\n", numAllZeroRowsCalculated, numTests)
 }
 
-func TestGetE(t *testing.T) {
-	const (
-		numTests               = 100
-		maxDiagonalElementSize = 100
-		eNumRows               = 17
-		mNumRows               = 16
-	)
-
-	numAllZeroColumnsCalculated := 0
-	for testNbr := 0; testNbr < numTests; testNbr++ {
-		for unreducedColumnCount := 0; unreducedColumnCount < mNumRows; unreducedColumnCount++ {
-			// Initializations
-			var m *bigmatrix.BigMatrix
-			var expected *RandomMInfo
-			unreducedColumns, err := getRandomUnreducedColumns(mNumRows, unreducedColumnCount, "TestGetE")
-			require.Len(t, unreducedColumns, unreducedColumnCount)
-			m, expected, err = createRandomM(
-				mNumRows, 2, maxDiagonalElementSize, unreducedColumns, "TestGetE",
-			)
-			require.NoError(t, err)
-			e := bigmatrix.NewEmpty(eNumRows, eNumRows)
-
-			// Get actual value of D
-			var actual struct {
-				isIdentity              bool
-				calculatedAllZeroColumn bool
-				mIsReduced              bool
-				mUnreducedRow           int
-				mUnreducedColumn        int
-				meIsReduced             bool
-				meUnreducedRow          int
-				meUnreducedColumn       int
-			}
-			actual.isIdentity, actual.calculatedAllZeroColumn, err = getE(m, e, "TestGetE")
-			require.NoError(t, err)
-			if actual.calculatedAllZeroColumn {
-				numAllZeroColumnsCalculated++
-			}
-
-			// Check whether M is reduced before being right-multiplied by E
-			actual.mIsReduced, actual.mUnreducedRow, actual.mUnreducedColumn, err = isColumnReduced(
-				m, bigNumberBitTolerance, "TestGetE",
-			)
-			require.NoError(t, err)
-			if unreducedColumnCount == 0 {
-				require.True(t, actual.mIsReduced)
-			} else {
-				require.False(t, actual.mIsReduced)
-			}
-			require.Equal(t, expected.unreducedRow, actual.mUnreducedRow)
-			require.Equal(t, expected.unreducedColumn, actual.mUnreducedColumn)
-
-			// Check isIdentity and the known entries of D on and above the diagonal
-			zero := bignumber.NewFromInt64(0)
-			one := bignumber.NewFromInt64(1)
-			if unreducedColumnCount == 0 {
-				require.True(t, actual.isIdentity)
-			}
-			for i := 0; i < eNumRows; i++ {
-				var diagonalElement *bignumber.BigNumber
-				diagonalElement, err = e.Get(i, i)
-				require.NoError(t, err)
-				equals := diagonalElement.Equals(one, zero)
-				require.True(t, equals)
-				err = isLowerQuadrangular(e, "TestGetE")
-				require.NoError(t, err)
-			}
-
-			// Check that E reduces M in columns of E that are not the identity
-			var me *bigmatrix.BigMatrix
-			me, err = bigmatrix.NewEmpty(mNumRows, mNumRows).MulUpperLeft(m, e)
-			require.NoError(t, err)
-			err = isLowerQuadrangular(me, "TestGetE")
-			require.NoError(t, err)
-			actual.meIsReduced, actual.meUnreducedRow, actual.meUnreducedColumn, err = isColumnReduced(
-				me, bigNumberBitTolerance, "TestGetE",
-			)
-			require.NoError(t, err)
-			if actual.meIsReduced {
-				require.Equal(t, -1, actual.meUnreducedRow)
-				require.Equal(t, -1, actual.meUnreducedColumn)
-			} else {
-				for i := 0; i < mNumRows; i++ {
-					var eIJ *bignumber.BigNumber
-					eIJ, err = e.Get(i, actual.meUnreducedColumn)
-					require.NoError(t, err)
-					if i == actual.meUnreducedColumn {
-						require.Zero(t, eIJ.Cmp(one))
-					} else {
-						require.Zero(t, eIJ.Cmp(zero))
-					}
-				}
-			}
-		}
-	}
-	fmt.Printf("Number of all zero columns calculated: %d / %d\n", numAllZeroColumnsCalculated, numTests)
-}
-
 func TestIsRowReduced(t *testing.T) {
 	const (
 		numTests           = 100
@@ -244,51 +146,6 @@ func TestIsRowReduced(t *testing.T) {
 	}
 }
 
-func TestIsColumnReduced(t *testing.T) {
-	const (
-		numTests         = 100
-		maxDiagonalEntry = 100
-		numRows          = 17
-	)
-
-	for testNbr := 0; testNbr < numTests; testNbr++ {
-		for unreducedColumnCount := 0; unreducedColumnCount < numRows; unreducedColumnCount++ {
-			// Initializations
-			var m *bigmatrix.BigMatrix
-			var expected *RandomMInfo
-			unreducedColumns, err := getRandomUnreducedColumns(
-				numRows, unreducedColumnCount, " TestIsColumnReduced",
-			)
-			require.NoError(t, err)
-			require.Len(t, unreducedColumns, unreducedColumnCount)
-			m, expected, err = createRandomM(
-				numRows, 2, maxDiagonalEntry, unreducedColumns, "TestIsColumnReduced",
-			)
-			require.NoError(t, err)
-
-			// Get actual values
-			var actual struct {
-				isReduced       bool
-				unreducedRow    int
-				unreducedColumn int
-			}
-			actual.isReduced, actual.unreducedRow, actual.unreducedColumn, err = isColumnReduced(
-				m, -bigNumberBitTolerance, "TestIsColumnReduced",
-			)
-			require.NoError(t, err)
-
-			// Compare expected to actual
-			require.Equal(t, expected.unreducedRow, actual.unreducedRow)
-			require.Equal(t, expected.unreducedColumn, actual.unreducedColumn)
-			if unreducedColumnCount == 0 {
-				require.True(t, actual.isReduced)
-			} else {
-				require.False(t, actual.isReduced)
-			}
-		}
-	}
-}
-
 func getRandomUnreducedRows(numRows, numUnreducedRows int, caller string) ([]int, error) {
 	// Initializations
 	caller = fmt.Sprintf("%s-getRandomUnreducedRows", caller)
@@ -316,32 +173,6 @@ func getRandomUnreducedRows(numRows, numUnreducedRows int, caller string) ([]int
 		}
 	}
 	return unreducedRows, nil
-}
-
-func getRandomUnreducedColumns(numRows, numUnreducedColumns int, caller string) ([]int, error) {
-	// Initializations
-	caller = fmt.Sprintf("%s-getRandomUnreducedColumns", caller)
-
-	// Check input
-	if numRows <= numUnreducedColumns {
-		return nil, fmt.Errorf(
-			"%s: numRows = %d <= %d = numUnreducedRows", caller, numRows, numUnreducedColumns,
-		)
-	}
-
-	// Get and return unreduced columns array
-	var unreducedColumns []int
-	switch numUnreducedColumns {
-	case 0:
-		unreducedColumns = []int{}
-	case 1:
-		// Avoid choosing column numRows-1, which has no entries below the diagonal
-		unreducedColumns = []int{rand.Intn(numRows - 1)}
-	default:
-		// As in the case of unreducedColumnCount being 2, avoid choosing row 0
-		unreducedColumns = getRandomIndices(numUnreducedColumns, numRows-1)
-	}
-	return unreducedColumns, nil
 }
 
 func isLowerQuadrangular(x *bigmatrix.BigMatrix, caller string) error {
