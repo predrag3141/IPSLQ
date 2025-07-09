@@ -81,6 +81,9 @@ import (
 // used.
 
 type PSLQContext struct {
+	// Input
+	MaxTreeDepth int `json:"max_tree_depth"`
+
 	// Computed before running PSLQ
 	InputAsBigInt           []big.Int `json:"input_as_big_int"`
 	InputAsDecimalString    []string  `json:"input_as_decimal_string"`
@@ -113,7 +116,10 @@ type PSLQContext struct {
 // values, centered at 0. The entries in the PSLQ input this function returns are intended
 // to have a random solution not equal to m, but with norm less than |m|, with probability
 // randomRelationProbabilityThresh. See the file-level comments for details.
-func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThresh float64) *PSLQContext {
+func NewPSLQContext(
+	xLen, maxTreeDepth, relationElementRange int,
+	randomRelationProbabilityThresh float64,
+) *PSLQContext {
 	rand.Seed(time.Now().Unix() % 1000)
 	relation, relationNorm := getCausalRelation(xLen, relationElementRange)
 	maxXBasedOnCubeVolume := math.Pow(float64(relationElementRange), float64(xLen)) / randomRelationProbabilityThresh
@@ -127,6 +133,7 @@ func NewPSLQContext(xLen, relationElementRange int, randomRelationProbabilityThr
 	maxXAsBigInt := big.NewInt(0).Exp(big.NewInt(2), big.NewInt(log2MaxX), nil)
 	inputAsBigInt, inputAsDecimalString := getX(relation, maxXAsBigInt)
 	return &PSLQContext{
+		MaxTreeDepth:                    maxTreeDepth,
 		InputAsBigInt:                   inputAsBigInt,
 		InputAsDecimalString:            inputAsDecimalString,
 		Relation:                        relation,

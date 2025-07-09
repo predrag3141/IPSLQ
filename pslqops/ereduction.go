@@ -25,7 +25,7 @@ const (
 //
 // - Any error encountered.
 func getE(
-	m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, log2EColumnsTested int, caller string,
+	m *bigmatrix.BigMatrix, e *bigmatrix.BigMatrix, maxTreeDepth int, caller string,
 ) (int, int, error) {
 	// Initializations
 	caller = fmt.Sprintf("%s-getE", caller)
@@ -64,7 +64,7 @@ func getE(
 		var bestColumn *EColumn // This nil value is updated except for the two rightmost columns
 		if j < mNumRows-1 {
 			var eColumns *EColumnArray
-			eColumns, err = newEColumnArray(m, reciprocalDiagonal, j, log2EColumnsTested, caller)
+			eColumns, err = newEColumnArray(m, reciprocalDiagonal, j, maxTreeDepth, caller)
 			bestColumn, err = eColumns.bestColumn(caller)
 			if err != nil {
 				return columnsReduced, columnsBounded, fmt.Errorf(

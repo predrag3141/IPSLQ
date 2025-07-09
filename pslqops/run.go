@@ -35,7 +35,7 @@ type State struct {
 	e                     *bigmatrix.BigMatrix
 	numRows               int // number of rows in H
 	numCols               int // number of columns in H, and the dimension of M
-	log2EColumnsTested    int
+	maxTreeDepth          int
 	observedRoundOffError *bignumber.BigNumber
 	roundOffCurrentWeight *bignumber.BigNumber
 	roundOffHistoryWeight *bignumber.BigNumber
@@ -52,7 +52,7 @@ type State struct {
 }
 
 // NewState returns a new State from a provided decimal string array
-func NewState(input []string, log2EColumnsTested int) (*State, error) {
+func NewState(input []string, maxTreeDepth int) (*State, error) {
 	// var rawX *bigmatrix.BigMatrix = GetRawX(input)
 	rawX, err := getRawX(input, "NewState")
 	if err != nil {
@@ -72,7 +72,7 @@ func NewState(input []string, log2EColumnsTested int) (*State, error) {
 		columnsBounded:        0,
 		numRows:               nr,
 		numCols:               nr - 1,
-		log2EColumnsTested:    log2EColumnsTested,
+		maxTreeDepth:          maxTreeDepth,
 		observedRoundOffError: bignumber.NewFromInt64(0),
 		roundOffCurrentWeight: nil,
 		solutionCount:         0,
@@ -571,7 +571,7 @@ func (s *State) step1(caller string) error {
 		}
 	} else {
 		var columnsReduced, columnsBounded int
-		columnsReduced, columnsBounded, err = getE(s.m, s.e, s.log2EColumnsTested, caller)
+		columnsReduced, columnsBounded, err = getE(s.m, s.e, s.maxTreeDepth, caller)
 		if err != nil {
 			return err
 		}

@@ -19,20 +19,20 @@ func TestNewKATLog(t *testing.T) {
 		randomRelationProbabilityThresh = 0.001
 		maxIterations                   = 100000
 		bigNumberPrecision              = 1500
-		log2EColumnsTested              = 8
+		maxTreeDepth                    = 8
 		reportingPeriodBeforeInverting  = 100
 		reportingPeriodAfterInverting   = 1
 	)
 
 	// Initialize PSLQ context
 	err := bignumber.Init(bigNumberPrecision)
-	pc := NewPSLQContext(xLen, relationElementRange, randomRelationProbabilityThresh)
+	pc := NewPSLQContext(xLen, maxTreeDepth, relationElementRange, randomRelationProbabilityThresh)
 	require.NotNil(t, pc.InputAsDecimalString)
 	require.NotNil(t, pc.InputAsBigInt)
 
 	// Initialize the PSLQ state from the PSLQ context
 	var state *pslqops.State
-	state, err = pslqops.NewState(pc.InputAsDecimalString, log2EColumnsTested)
+	state, err = pslqops.NewState(pc.InputAsDecimalString, pc.MaxTreeDepth)
 	require.NoError(t, err)
 
 	// Initialize the KAT logger from the PSLQ context
