@@ -37,7 +37,7 @@ func TestNewKATLog(t *testing.T) {
 
 	// Initialize the KAT logger from the PSLQ context
 	var kl *KATLog
-	kl, err = NewKATLog(os.TempDir(), xLen, reportingPeriodBeforeInverting, reportingPeriodAfterInverting)
+	kl, err = NewKATLog(os.TempDir(), xLen, pc.MaxTreeDepth, reportingPeriodBeforeInverting, reportingPeriodAfterInverting)
 	require.NoError(t, err)
 
 	// Run PSLQ

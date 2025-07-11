@@ -41,7 +41,7 @@ type KATLog struct {
 
 // NewKATLog creates an instance of the KAT logger
 func NewKATLog(
-	baseDir string, dimension,
+	baseDir string, dimension, maxTreeDepth,
 	reportingPeriodBeforeInverting, reportingPeriodAfterInverting int,
 ) (*KATLog, error) {
 	// Scalar initializations
@@ -62,7 +62,8 @@ func NewKATLog(
 
 	// Progress file
 	retVal.progressFilePath = filepath.Join(
-		baseDir, progressDirName, fmt.Sprintf("dim_%d-%s", dimension, timeStamp),
+		baseDir, progressDirName,
+		fmt.Sprintf("dim_%d-depth_%d-%s", dimension, maxTreeDepth, timeStamp),
 	)
 	retVal.progressFile, err = os.OpenFile(
 		retVal.progressFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
@@ -74,7 +75,8 @@ func NewKATLog(
 
 	// Results file
 	retVal.resultFilePath = filepath.Join(
-		baseDir, resultsDirName, fmt.Sprintf("dim_%d-%s", dimension, timeStamp),
+		baseDir, resultsDirName,
+		fmt.Sprintf("dim_%d-depth_%d-%s", dimension, maxTreeDepth, timeStamp),
 	)
 	retVal.resultFile, err = os.OpenFile(
 		retVal.resultFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
