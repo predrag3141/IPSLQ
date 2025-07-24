@@ -281,7 +281,7 @@ func (s *State) GetColumnCounts() *ColumnCounts {
 		}
 	}
 	return &ColumnCounts{
-		Processed: s.mIterationCount*s.m.NumRows() - 1,
+		Processed: s.mIterationCount * (s.m.NumRows() - 1),
 		Reduced:   s.columnsReduced,
 		Bounded:   s.columnsBounded,
 	}

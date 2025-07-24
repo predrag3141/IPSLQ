@@ -72,7 +72,7 @@ func NextIntOp(hOrM *bigmatrix.BigMatrix) (*IntOperation, float64, error) {
 			}
 		}
 
-		// Compute the integer operation that best sorts the diagonal elements
+		// Compute the integer operation that best sorts the partial column norms
 		retVal, err = sortDiagonal(mAsFloat64Sq, hOrM.NumRows(), "NextIntOp")
 		if err != nil {
 			return nil, 0, fmt.Errorf("NextIntOp: could not sort columns by norm: %q", err)
@@ -247,9 +247,19 @@ func bestDiagonalRowOpInH(h *bigmatrix.BigMatrix, caller string) (*IntOperation,
 	return bestRowOp, nil
 }
 
-// sortColumnsByNorm returns a column operation that sorts the columns of M
-// by their Euclidean lengths. If this turns out to be the identity, a nil
-// column operation is returned.
+// sortDiagonal returns the column operation that improves the sorting of columns of M by
+// their diagonal elements. If this turns out to be the identity, not even one pair of
+// columns can be swapped, and a nil column operation is returned.
+//
+// The algorithm used to sort diagonal elements analyzes a square sub-matrix M' of M,
+// sharing its diagonal with M. When the left and right columns of M' are swapped,
+// and the upper-right of M (and M') is zeroed out, the Euclidean norm of the left
+// column of M' shows up as the bottom right entry of M'.
+//
+// To sort diagonal elements, sub-matrices like M' containing a left-most column
+// whose norm is smaller than their right-most element are identified. Left and right
+// columns from such sub-matrices are collected into a full permutation that
+// improves the ordering of the diagonal.
 func sortDiagonal(mAsFloat64Sq []float64, numRows int, caller string) (*IntOperation, error) {
 	// Set caller and test dimensions
 	caller = fmt.Sprintf("%s-sortDiagonal", caller)
@@ -310,7 +320,7 @@ func sortDiagonal(mAsFloat64Sq []float64, numRows int, caller string) (*IntOpera
 		return columnOrderToIntOp(columnOrder, numRows, caller)
 	}
 
-	// No columns were moved when sorting diagonal elements
+	// No columns were moved when sorting columns by norm
 	return nil, nil
 }
 
